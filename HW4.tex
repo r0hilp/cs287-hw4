@@ -2,41 +2,60 @@
 \usepackage{writeup/common}
 \usepackage{url}
 
-\title{CS 287 \\ Assignment 2: Tagging from Scratch }
+\title{CS 287 \\ Assignment 4: Grammar Check}
 \date{}
 \begin{document}
 
 \maketitle{}
 
 \begin{center}
-  \textbf{Due:} Monday, Feb 22nd, 11:59 pm 
+  \textbf{Due:} Monday, March 28th, 11:59 pm 
 \end{center}
 
 
-In class we have been discussing an influential neural network model
-for part-of-speech tagging, based on the paper \textit{NLP (Almost)
-  from Scratch} \citep{collobert2011natural}. The goal of this
-homework assignment is to replicate the central model from this
-work. At the end of this assignment, you will have created your own
-state-of-the-art part-of-speech tagger, and built a framework that can
-be used easily for many other NLP tasks.
+Over the last couple years there has been tremendous interest in
+recurrent neural networks for natural language tasks, and in
+particular the long short-term memory (LSTM) network. The last 
+several classes have focused on the theory and structure of 
+recurrent networks. For this assignment you will actually 
+construct utilize an LSTM for a real-world problem. 
 
-Warning: this assignment will be a bit challenging in a way that is
-different from a standard CS assignment. There is not much code to
-write here, our implementation of this assignment contains $<150$
-lines of Lua code; however you will have to run experiments that
-require several hours of training time . Therefore it is crucially
-important that all the details (network sizes, preprocessing,
-features, training) are correct.  We will point you to the sections of
-the paper that contain important information, but it is up to you to
-test and implement each aspect.  Before you start we advise that you
-get very comfortable with the notes from class, the paper itself, and especially Torch and the \texttt{nn}
-library.
+The problem we will focus on is grammar check, that is identifying
+grammatical issues in sentences, particularly in the writing of
+language learners. This problem is based on the CoNLL Shared Task 
+of 2013 and 2014 \cite{}. 
+
+Unlike past assignments, our work here will not be based on any
+existing paper. As far as I know, no one has yet looked as this 
+method applied to this data set. However this will give you a chance 
+to experiment with the LSTM on this task. 
+
+
+
+% In class we have been discussing an influential neural network model
+% for part-of-speech tagging, based on the paper \textit{NLP (Almost)
+%   from Scratch} \citep{collobert2011natural}. The goal of this
+% homework assignment is to replicate the central model from this
+% work. At the end of this assignment, you will have created your own
+% state-of-the-art part-of-speech tagger, and built a framework that can
+% be used easily for many other NLP tasks.
+
+% Warning: this assignment will be a bit challenging in a way that is
+% different from a standard CS assignment. There is not much code to
+% write here, our implementation of this assignment contains $<150$
+% lines of Lua code; however you will have to run experiments that
+% require several hours of training time . Therefore it is crucially
+% important that all the details (network sizes, preprocessing,
+% features, training) are correct.  We will point you to the sections of
+% the paper that contain important information, but it is up to you to
+% test and implement each aspect.  Before you start we advise that you
+% get very comfortable with the notes from class, the paper itself, and especially Torch and the \texttt{nn}
+% library.
 
 
 As you complete this assignment, we ask that you submit your results
 on the test data to the Kaggle competition website at
-\url{https://inclass.kaggle.com/c/cs287-hw2} and that you compile your
+\url{https://inclass.kaggle.com/c/cs287-hw4} and that you compile your
 experiences in a write-up based on the template at
 \url{https://github.com/cs287/hw_template}.
 
@@ -348,6 +367,6 @@ experimental process. This should include data tables, graphs and discussion of 
 issues that you may run into. 
 
 \bibliographystyle{apalike} 
-\bibliography{HW2}
+\bibliography{HW4}
 
 \end{document}
