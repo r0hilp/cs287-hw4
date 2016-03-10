@@ -2,14 +2,14 @@
 \usepackage{writeup/common}
 \usepackage{url}
 
-\title{CS 287 \\ Assignment 4: Grammar Check}
+\title{CS 287 \\ Assignment 4: Word Segmentation}
 \date{}
 \begin{document}
 
 \maketitle{}
 
 \begin{center}
-  \textbf{Due:} Monday, March 28th, 11:59 pm 
+  \textbf{Due:} Friday, April 1st, 11:59 pm 
 \end{center}
 
 
@@ -20,14 +20,12 @@ several classes have focused on the theory and structure of
 recurrent networks. For this assignment you will actually 
 construct utilize an LSTM for a real-world problem. 
 
-The problem we will focus on is grammar check, that is identifying
-grammatical issues in sentences, particularly in the writing of
-language learners. This problem is based on the CoNLL Shared Task 
-of 2013 and 2014 \cite{}. 
-
+The problem we will focus on is word segmentation, that is identifying
+the spaces in sentence-based on the previous characters only.  This is
+a simplified version of word segmentation processes necessary for
+processing languages written without spaces, such as Korea or Chinese.
 Unlike past assignments, our work here will not be based on any
-existing paper. As far as I know, no one has yet looked as this 
-method applied to this data set. However this will give you a chance 
+existing paper. However this will give you a chance 
 to experiment with the LSTM on this task. 
 
 
@@ -63,35 +61,35 @@ experiences in a write-up based on the template at
 
 \subsection{Data}
 
-The main data for this task is in the \texttt{data/} directory. Here
-is the first training sentence with part-of-speech tags. (This is a
-classic sentence that any NLP researcher knows by heart. See this obituary on
-the amazing Language Log, 
-\url{http://languagelog.ldc.upenn.edu/nll/?p=3594}.).
+% The main data for this task is in the \texttt{data/} directory. Here
+% is the first training sentence with part-of-speech tags. (This is a
+% classic sentence that any NLP researcher knows by heart. See this obituary on
+% the amazing Language Log, 
+% \url{http://languagelog.ldc.upenn.edu/nll/?p=3594}.).
 
-\begin{verbatim}
-> head -n 20 data/train.tags.text
-1	1	Pierre	NNP
-2	2	Vinken	NNP
-3	3	,	,
-4	4	61	CD
-5	5	years	NNS
-6	6	old	JJ
-7	7	,	,
-8	8	will	MD
-9	9	join	VB
-10	10	the	DT
-11	11	board	NN
-12	12	as	IN
-13	13	a	DT
-14	14	nonexecutive	JJ
-15	15	director	NN
-16	16	Nov.	NNP
-17	17	29	CD
-18	18	.	.
+% \begin{verbatim}
+% > head -n 20 data/train.tags.text
+% 1	1	Pierre	NNP
+% 2	2	Vinken	NNP
+% 3	3	,	,
+% 4	4	61	CD
+% 5	5	years	NNS
+% 6	6	old	JJ
+% 7	7	,	,
+% 8	8	will	MD
+% 9	9	join	VB
+% 10	10	the	DT
+% 11	11	board	NN
+% 12	12	as	IN
+% 13	13	a	DT
+% 14	14	nonexecutive	JJ
+% 15	15	director	NN
+% 16	16	Nov.	NNP
+% 17	17	29	CD
+% 18	18	.	.
 
-19	1	Mr.	NNP
-\end{verbatim}
+% 19	1	Mr.	NNP
+% \end{verbatim}
 
 \vspace{0.5cm}
 
