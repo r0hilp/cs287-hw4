@@ -1,6 +1,7 @@
 \documentclass[11pt]{article}
 \usepackage{writeup/common}
 \usepackage{url}
+\usepackage{listings}
 
 \title{CS 287 \\ Assignment 4: Word Segmentation}
 \date{}
@@ -23,33 +24,14 @@ construct utilize an LSTM for a real-world problem.
 The problem we will focus on is word segmentation, that is identifying
 the spaces in sentence-based on the previous characters only.  This is
 a simplified version of word segmentation processes necessary for
-processing languages written without spaces, such as Korea or Chinese.
+processing languages written without spaces, such as Korean or Chinese.
 Unlike past assignments, our work here will not be based on any
 existing paper. However this will give you a chance 
 to experiment with the LSTM on this task. 
 
-
-
-% In class we have been discussing an influential neural network model
-% for part-of-speech tagging, based on the paper \textit{NLP (Almost)
-%   from Scratch} \citep{collobert2011natural}. The goal of this
-% homework assignment is to replicate the central model from this
-% work. At the end of this assignment, you will have created your own
-% state-of-the-art part-of-speech tagger, and built a framework that can
-% be used easily for many other NLP tasks.
-
-% Warning: this assignment will be a bit challenging in a way that is
-% different from a standard CS assignment. There is not much code to
-% write here, our implementation of this assignment contains $<150$
-% lines of Lua code; however you will have to run experiments that
-% require several hours of training time . Therefore it is crucially
-% important that all the details (network sizes, preprocessing,
-% features, training) are correct.  We will point you to the sections of
-% the paper that contain important information, but it is up to you to
-% test and implement each aspect.  Before you start we advise that you
-% get very comfortable with the notes from class, the paper itself, and especially Torch and the \texttt{nn}
-% library.
-
+Before you start we advise that you get very comfortable with the
+notes from class, the papers on LSTMs, and especially the torch
+\texttt{rnn} library.
 
 As you complete this assignment, we ask that you submit your results
 on the test data to the Kaggle competition website at
@@ -61,150 +43,182 @@ experiences in a write-up based on the template at
 
 \subsection{Data}
 
-% The main data for this task is in the \texttt{data/} directory. Here
-% is the first training sentence with part-of-speech tags. (This is a
-% classic sentence that any NLP researcher knows by heart. See this obituary on
-% the amazing Language Log, 
-% \url{http://languagelog.ldc.upenn.edu/nll/?p=3594}.).
+The data for this task is under the \texttt{data/} directory. 
+Our data is the same of the previous assignment, except that 
+now we have given you only the characters of the data set 
+separated with explicit space tokens. 
 
-% \begin{verbatim}
-% > head -n 20 data/train.tags.text
-% 1	1	Pierre	NNP
-% 2	2	Vinken	NNP
-% 3	3	,	,
-% 4	4	61	CD
-% 5	5	years	NNS
-% 6	6	old	JJ
-% 7	7	,	,
-% 8	8	will	MD
-% 9	9	join	VB
-% 10	10	the	DT
-% 11	11	board	NN
-% 12	12	as	IN
-% 13	13	a	DT
-% 14	14	nonexecutive	JJ
-% 15	15	director	NN
-% 16	16	Nov.	NNP
-% 17	17	29	CD
-% 18	18	.	.
 
-% 19	1	Mr.	NNP
-% \end{verbatim}
+\lstset{ basicstyle=\ttfamily, breaklines=true}
 
-\vspace{0.5cm}
+\begin{lstlisting}
+> head data/valid_chars.txt 
+c o n s u m e r s <space> m a y <space> w a n t <space> t o <space> m o v e <space> t h e i r
+<space> t e l e p h o n e s <space> a <space> l i t t l e <space> c l o s e r <space> t o <space> 
+t h e <space> t v <space> s e t </s> < u n k > <space> < u n k > <space> w a t c h i n g <space> 
+a b c <space> ' s <space> m o n d a y <space> n i g h t <space> f o o t b a l l <space> c a n 
+<space> n o w <space> v o t e <space> d u r i n g <space> < u n k > <space> f o r <space> t h e 
+<space> g r e a t e s t <space> p l a y <space> i n <space> N <space> y e a r s <space> f r o m 
+<space> a m o n g <space> f o u r <space> o r <space> f i v e <space> < u n k > <sp
+\end{lstlisting}
 
-Each line of the file contains one tokenized word. The columns represent:
+Note that for this problem set we no longer print the data file in lines, we 
+simply concatenate together each one of the sentence separated with a $</s>$
+symbol. 
 
-\begin{enumerate}
-\item the global id of the word
-\item the sentence id of the word
-\item the tokenized word form
-\item the part-of-speech tag
-\end{enumerate}
 
-\noindent Sentences are separated by blank rows. Sentence boundaries are a
-classic source of errors, so you will have to handle these carefully. In addition we also include a tag dictionary file. 
+The test data is in file \texttt{test\_chars.txt}. This file consists 
+of one sentence per line and includes no explicit spaces. The aim of 
+the project is to re-insert spaces back into the sentences. We have 
+also provided this file for the validation data.
 
-\begin{verbatim}
-> head  data/tags.dict 
-NNP     1
-,       2
-CD      3
-NNS     4
-JJ      5
-MD      6
-VB      7
-DT      8
-NN      9
-IN      10
-\end{verbatim}
+\begin{lstlisting}
+> head data/valid_chars_kaggle.txt 
+c o n s u m e r s  m a y  w a n t  t o  m o v e  t h e i r  t e l e p h o n e s  a  l i t t l 
+e  c l o s e r  t o  t h e  t v  s e t </s>                                                  
+< u n k >  < u n k >  w a t c h i n g  a b c  ' s  m o n d a y  n i g h t  f o o t b a l l  c 
+a n  n o w  v o t e  d u r i n g  < u n k >  f o r  t h e  g r e a t e s t  p l a y  i n  N  y
+ e a r s  f r o m  a m o n g  f o u r  o r  f i v e  < u n k >  < u n k > </s>               
+t w o  w e e k s  a g o  v i e w e r s  o f  s e v e r a l  n b c  < u n k >  c o n s u m e r 
+ s e g m e n t s  s t a r t e d  c a l l i n g  a  N  n u m b e r  f o r  a d v i c e  o n  v 
+a r i o u s  < u n k >  i s s u e s </s>                                                     
+a n d  t h e  n e w  s y n d i c a t e d  r e a l i t y  s h o w  h a r d  c o p y  r e c o r 
+d s  v i e w e r s  '  o p i n i o n s  f o r  p o s s i b l e  a i r i n g  o n  t h e  n e x
+ t  d a y  ' s  s h o w </s>                                                                 
+i n t e r a c t i v e  t e l e p h o n e  t e c h n o l o g y  h a s  t a k e n  a  n e w  l e
+\end{lstlisting}
 
-This is a mapping from each part-of-speech tag in the Penn Treebank to
-a unique ID. It is important that you use this mapping since it 
-is used for the Kaggle competition data. For those interested, the
-specification of the mapping from names to descriptions is given at
-\url{https://www.ling.upenn.edu/courses/Fall_2003/ling001/penn_treebank_pos.html}.
+The Kaggle answer file should simply provide the number of spaces for each sentence. 
+We have provided you with a sample answer file for reference.     
 
+\begin{lstlisting}
+> head data/valid_chars_kaggle_answer.txt 
+ID,Count
+1,13
+2,26
+3,20
+4,20
+5,18
+6,11
+7,26
+\end{lstlisting}
 
 \subsection{Preprocessing}
 
 For this assignment you will write your own preprocessing code
-in \texttt{preprocessing.py}. This code should transform the
-data representations given above into a format for multi-class
-classification. In particular you will be responsible for,
+in \texttt{preprocessing.py}. Preprocessing for this assignment
+means transforming the training corpus into a representation 
+usable for RNN training. As in previous assignments you 
+will need to create a map from characters 
+to indices. However, since there is no longer a fixed window size the layout is 
+a bit different. The following is a description of how to structure the 
+input data for a transducer RNN.
 
-\begin{itemize}
-\item Clean the input data following Section 3.4
-\item Pre-construct the features that are fed into the network
-\item Pre-construct the windows around each word (as described in class)
-\item Write out a vector of the pretrained embeddings for each word (see below)
-\end{itemize}
+Say our training corpus consists of character $w_1, \ldots, w_n$ 
+In a perfect world, we could have the RNN as one long matrix. 
 
-The important paragraph from Section 3.4 describes the necessary
-preprocessing,
+\[
+  \begin{bmatrix}
+    w_1 & w_2 & \ldots & w_n
+  \end{bmatrix}
+\] 
 
-\begin{quote}
-  All our networks were fed with two raw text features: lower case
-  words, and a capital letter feature. We chose to consider lower case
-  words to limit the number of words in the dictionary. However, to
-  keep some upper case information lost by this transformation, we
-  added a “caps” feature which tells if each word was in low caps, was
-  all caps, had first letter capital, or had one
-  capital. Additionally, all occurrences of sequences of numbers
-  within a word are replaced with the string “NUMBER”, so for example
-  both the words “PS1” and “PS2” would map to the single word
-  “psNUMBER”. We used a dictionary containing the 100,000 most common
-  words in WSJ (case insensitive). Words outside this dictionary were
-  replaced by a single special “RARE” word.
-\end{quote}
+However, this would mean we would need to wait $n$ steps to backprop. Instead 
+it is more common to select a fixed \textit{sequence length} $l$ for doing 
+backpropagation. We pass the hidden state  between sequences ($\bolds_l$ combines with $w_{l+1}$), but only 
+backprop within a sequence length window. 
+
+\[
+  \begin{bmatrix}
+    w_1 & w_2 & \ldots & w_{l}
+  \end{bmatrix}   \begin{bmatrix}
+    w_{l+1} & w_{l+2} & \ldots & w_{2l}
+  \end{bmatrix}
+  \ldots
+  \begin{bmatrix}
+    w_{n-l+1} & w_{n-l+2} & \ldots & w_{n}
+  \end{bmatrix}
+\] 
+
+When you use this strategy, you much call the following rnn function to save states between 
+matrices 
+
+\begin{lstlisting}
+model:remember('both')
+\end{lstlisting}
+
+While this method has a fixed backprop length of $s$, with a reasonable 
+size $s$ it works well in practice. Unfortunately it is quite slow since 
+we cannot use a batch (sequential processing). To get around this issue 
+we split the sequence into $b$ parts and fold them over each other. 
 
 
-We would recommend using \texttt{\#} instead \texttt{NUMBER} as that is more 
-common these days.  
 
-Also note the remark on border words, 
+\[
+  \begin{bmatrix}
+    w_1 & w_2 & \ldots & w_{l}\\
+    w_{n/b+1} & w_{n/b+1} & \ldots & w_{n/b+l}\\
+    \vdots \\
+    w_{(b-1)n/b + 1} & w_{(b-1)n/b+2} & \ldots & w_{(b-1)n/b+l}
+  \end{bmatrix}   \begin{bmatrix}
+    w_{l+1} &  \ldots & w_{2l} \\
+    w_{n/b+l+1} &  \ldots & w_{n/b+2l}\\
+    & \vdots & \\
+    & \ldots &  
+  \end{bmatrix}
+  \ldots
+  \begin{bmatrix}
+    w_{n/b-l+1} & w_{n/b-l+2} & \ldots & w_{n/b}\\
+    & \ldots & \\
+    & \vdots & \\
+    & \ldots & 
+  \end{bmatrix}
+\] 
 
-\begin{quote}
-Remark 1 (Border Effects) The feature window (3) is not well defined for words near
-the beginning or the end of a sentence. To circumvent this problem, we augment the sentence
-with a special “PADDING” word replicated dwin/2 times at the beginning and the end. This
-is akin to the use of “start” and “stop” symbols in sequence models.
-\end{quote}
+This allows both batching and backprop with a fixed length. Note
+though that the hidden states at first timestep ($\bolds_{n/b+1}$)
+will be incorrect since they get computed before their correct
+previous hidden ($\bolds_{n/b}$). However this is tolerable since it
+only leads to $b$ incorrect hidden states during training.
 
-Since there are only two types of features (word and capitalization),
-it is likely easiest to simply output two tensors. When done you
-should output something like the following matrices in an HDF5
-group. We ended with something like this, although yours may vary.
 
-\begin{quote}
-  train\_input\_word\_windows, train\_input\_cap\_windows,
-  train\_output valid\_input\_word\_windows,
-  valid\_input\_cap\_windows, valid\_output,
-  test\_input\_word\_windows, test\_input\_words, nclasses, nwords,
-  word\_embeddings
-\end{quote}
+
+
+Since we will be building a transducer, we also need the training 
+data to be in the same format. Say we are predicting $\hat{y}$ at 
+each step. Then our target output will be of the form, 
+
+\[
+  \begin{bmatrix}
+    y_1 & y_2 & \ldots & y_{l}\\
+    y_{n/b+1} & y_{n/b+1} & \ldots & y_{n/b+l}\\
+    \vdots \\
+    y_{(b-1)n/b + 1} & y_{(b-1)n/b+2} & \ldots & y_{(b-1)n/b+l}
+  \end{bmatrix}   \begin{bmatrix}
+    y_{l+1} &  \ldots & y_{2l} \\
+    y_{n/b+l+1} &  \ldots & y_{n/b+2l}\\
+    & \vdots & \\
+    & \ldots &  
+  \end{bmatrix}
+  \ldots
+  \begin{bmatrix}
+    y_{n/b-l+1} & y_{n/b-l+2} & \ldots & y_{n/b}\\
+    & \ldots & \\
+    & \vdots & \\
+    & \ldots & 
+  \end{bmatrix}
+\] 
+
+For language modeling the target output $y_i$ would be the next word
+$w_{i+1}$.  For this assignment, our goal is simply space
+prediction. Therefore the target output $y_i$ will be $2$ if the next
+word $w_{i+1}$ is a space and $1$ otherwise.
 
 \section{Code Setup}
 
-Write your main code in \texttt{HW2.lua}. For this assignment part,
-you can (and should) use the \texttt{nn} library in addition to the
+Write your main code in \texttt{HW4.lua}. For this assignment part,
+you can (and should) use the \texttt{nn} and \texttt{rnn} library in addition to the
 standard Torch library. You should not need to use any extra libraries.
-
-\subsection{Prediction and Evaluation}
-
-Be sure you are able to read and output the text data and that you
-understand the format.  Also be sure you are able output your
-classification results on the test data as a text file. Check that you
-can upload these to the Kaggle. The Kaggle submission takes in the
-global id of the word (first column) and the class (1-based). For
-example
-
-\begin{verbatim}
-ID,Class
-1,20
-2,24
-3,12
-\end{verbatim}
 
 \subsection{Hyperparameters}
 
@@ -226,120 +240,72 @@ responsibility to convince us that the model is correctly training.
 \section{Models}
 
 For this assignment you will implement the three models. We will warm
-up with naive Bayes and multiclass logistic regression, then we will
-move on to the full neural network model from
-\citet{collobert2011natural}, both with and without pre-trained embeddings.
-
-\subsection{Naive Bayes}
-
-To start, modify your code from HW1
-to implement a windowed version of
-naive Bayes first. This will give
-you an efficient method that is easy
-to debug.
-
-Note since the windowed setup has a fixed length, we can use a more appropriate 
-factorization than the last problem. Informally,
-
-\[ p(\boldx, \boldy=\delta(c)) = p(\boldy=\delta(c)) \prod_{i=-\lfloor{dwin/2}\rfloor}^{\lfloor{dwin/2}\rfloor}
-p(\mathrm{word\ at\ i\ in\ }\boldx | \boldy =\delta(c))
-p(\mathrm{capitalization\ at\ i\ in\ }\boldx | \boldy =\delta(c)) \]
-
-That is we can treat each relative window position as a separate
-multinomial distribution over its feature instead of having a single
-multinomial over all features.
+up with a count-based model. Then we will
+try our Bengio NNLM and an LSTM model. 
 
 
-\subsection{Multiclass Logistic Regression}
+\subsection{Count-Based Model}
 
-As a second baseline, you will reimplement multiclass logistic
-regression for this problem. However, for this assignment instead of
-using your previous code, you will implement it using the \texttt{nn}
-library with mini-batch SGD.
+To start, modify your code from HW3
+to implement a count-based character n-gram model. 
+The model should only give the probability of the next 
+word being a space  
 
+\[ P(w_i =<\mathrm{space}> | w_{i-n+1}, \ldots w_{i-1}) \]
 
+Test the model out by determining its perplexity on 
+the validation set and by running on the segmentation task. 
 
-Note the following correspondences,
+For segmentation you should run two inference algorithms. 
 
-\begin{center}
-  \begin{tabular}{ll}
-    \toprule
-    Math & Torch \\
-    \midrule 
-    sparse $\boldx \boldW$ & nn.LookupTable \\ 
-    $\log \mathrm{softmax}$ & nn.LogSoftMax \\ 
-    $L_{cross-entropy}()$ & nn.ClassNLL \\ 
-    dense $\boldx \boldW + \boldb$ & nn.Linear \\ 
-    \bottomrule
-  \end{tabular}
-\end{center}
-The documentation (\url{https://github.com/torch/nn}) is quite good
-for all of these models (although it is possible the notation may be
-slightly different than class).
+\begin{enumerate}
+\item Greedily predict whether the next word is a space, and feedback 
+  into the model. (i.e. if it is a space, add the $<$space$>$ to the context. Otherwise continue normally).
 
-The training and evaluation code for the model will take a different (but similar) form 
-from HW1. Here are a couple tips for implementing this code. 
- 
- \begin{itemize}
- \item Train using minibatches (we used size 32). This will significantly speed up training. 
- \item Keep track of the average loss as you train. 
- \item Run on the development set each iteration to see the progress of the model.
- \item You should not have to run for more than 20 epochs on this data. If you are seeing large 
-   changes beyond that, you may have an issue. 
- \item We recommend that you first test this code on multiclass
-   logistic regression before moving on to the neural network model.
- \end{itemize}
+\item Dynamic programming over n-grams as described in class. 
+\end{enumerate}
 
-\subsection{Neural Network Model}
+\subsection{Neural Language Model}
 
-Finally implement the word-level neural network described in Section 3
-of the paper (Figure 1), and discussed in class. The model should not
-require many more units than for multiclass logistic
-regression. Basically you should be able to reuse all training and
-test code, and only change the model itself.
+As a second baseline, you will modify your neural language 
+model from the HW3 to predict whether the next character is a 
+space or not. This should be relatively similar to your previous 
+code, except that you will be prediction $1$ or $2$ instead 
+of a softmax over words. For this problem you can have a much smaller embedding 
+size of around $\approx 15$ 
 
-We refer you to the paper itself for the details about the model
-architecture and layer sizes. The authors are very detailed about
-these sizes and the experiments that they ran. You should not have to
-worry about aspects like model initialization since Torch sets
-reasonable defaults.
+As above you should test your model 
+by running greedy search and dynamic programming (for a small size). 
 
-One tricky aspect is handling separately-sized embeddings for words
-and capitalization features. Start with just word-embeddings.  To
-include capitalization we used \texttt{nn.ParallelTable},
-\texttt{nn.JoinTable}, and \texttt{nn.View} (although there are other
-ways to do this.)
+\subsection{RNN Model}
 
+The main portion of the assignment will be implementing the 
+RNN model using the Elements \texttt{rnn} library. Much of the 
+main portion of the work is done for you by the library. However 
+getting the details right is crucially important. 
 
-\subsection{Neural Network Model with Pretrained Vectors}
+For this model you should implement a generic RNN transducer. 
+Given the current state of the RNN you are simply trying to predict 
+whether this is a space in the next word. 
 
-Perhaps the most influential aspect is Section 4 which discusses
-semi-supervised training of the model. This section incorporates a
-large corpus of unlabeled data to ``pretrain'' the word embeddings
-that are used in the model. This pretraining gives good starting
-representations, which are particularly useful for rare words in the 
-training vocabulary.
+\paragraph{Necessary Hacks:}
+In any torch model you can call the following function one time to get 
+a vector of all the params and gradients of the params. 
 
+\begin{lstlisting}
+   local params, grad_params = model:getParameters()
+\end{lstlisting}
 
-Unfortunately we do not have the computational power or the time to
-replicate these experiments. The authors note, "Since training times
-for such large scale systems are counted in weeks, it is not feasible
-to try many combinations of hyperparameters" (Although as we will see
-in the next assignment, that this training time has been brought down
-significantly.)
- 
-Luckily, pre-trained word embeddings are now conveniently available on
-the internet. We will use the vectors provided in
-\texttt{data/word\_embeddings}. First, you should align the word
-features with the vectors in this file in your preprocessing. 
-As part of preprocessing you should output a matrix of
-embeddings, where each row $i$ contains the embedding for 
-word index $i$.
+Once you have these vectors you should do the following:
+\begin{itemize}
+\item To begin you should initialize all the params to be uniform between $-0.05$ and $0.05$.
+\item Before updating your parameters, you should perform gradient normalization with max norm $5$.
+\end{itemize}
 
-Then before running training you should replace the parameters in your
-lookup table with the word embeddings before training your model. Read
-the code in \texttt{nn.LookupTable} to get a sense of how these
-parameters are stored and what you should replace.
+Once you have the model, use it in the greedy fashion described above. 
+At each time step predict whether the next word is a space. If it is, feed 
+in a $<$space$>$ to the model before continuing, otherwise continue onward. 
+Keep track of how many spaces you have seen so far. 
 
 \subsection{Additional Experiments}
 
@@ -348,10 +314,13 @@ additional experiments on these data sets. We will leave this aspect
 open-ended, but suggestion include:
 
 \begin{itemize}
-\item Including additional features (for instance see Section 6 \citep{collobert2011natural})
+\item Compare performance between the LSTM, RNN and GRU on this task
+
+\item Experiment with stack LSTM and dropout. The rnn library provides details for how to implement this. Also see \cite{}. 
+\item Try implementing a bidirectional LSTM for prediction. This model is provided by the rnn library. In this model you do not need to do greedy search, however you will 
+  have to change your training such that you do not see the spaces in the data.
 \item Experiment with different optimization techniques. For instance see the \texttt{optim} package. 
-\item Experimenting with different architectures. Do more layers help? 
-\item Sometimes it is more convenient to have fixed embeddings (as opposed to changing them during training). Experiment with "fixing" the embedding layer. (Hint: make sure the embedding layer does not receive gradients.)
+
 \end{itemize}
 
 \section{Report and Submission}
