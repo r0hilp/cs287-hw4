@@ -24,10 +24,26 @@ construct utilize an LSTM for a real-world problem.
 The problem we will focus on is word segmentation, that is identifying
 the spaces in sentence-based on the previous characters only.  This is
 a simplified version of word segmentation processes necessary for
-processing languages written without spaces, such as Korean or Chinese.
-Unlike past assignments, our work here will not be based on any
-existing paper. However this will give you a chance 
-to experiment with the LSTM on this task. 
+processing languages written without spaces, such as Korean or
+Chinese.  
+
+Given an input sequence of characters such as 
+\begin{center}
+  \texttt{t h e d o g w a l k s t o t h e p a r k}
+\end{center}
+
+\noindent You will attempt to give back the
+original sequence of words:
+
+\begin{center}
+  \texttt{the dog walks to the park}.
+\end{center}
+
+Unlike
+past assignments, this assignment is not a research-level
+task. However this will give you a chance to experiment with LSTM in a
+clear domain. If you are interested in further experimentation, you 
+can tweak your code to produce a working LSTM language model and babbler. 
 
 Before you start we advise that you get very comfortable with the
 notes from class, the papers on LSTMs, and especially the torch
@@ -114,8 +130,9 @@ to indices. However, since there is no longer a fixed window size the layout is
 a bit different. The following is a description of how to structure the 
 input data for a transducer RNN.
 
-Say our training corpus consists of character $w_1, \ldots, w_n$ 
-In a perfect world, we could have the RNN as one long matrix. 
+Say our training corpus consists of characters $w_1, \ldots, w_n$ 
+In a perfect world, 
+we could have the RNN consume as one long matrix. 
 
 \[
   \begin{bmatrix}
@@ -125,7 +142,8 @@ In a perfect world, we could have the RNN as one long matrix.
 
 However, this would mean we would need to wait $n$ steps to backprop. Instead 
 it is more common to select a fixed \textit{sequence length} $l$ for doing 
-backpropagation. We pass the hidden state  between sequences ($\bolds_l$ combines with $w_{l+1}$), but only 
+backpropagation. We remember the hidden state between
+sequences ($\bolds_l$ combines with $w_{l+1}$), but only 
 backprop within a sequence length window. 
 
 \[
@@ -141,14 +159,14 @@ backprop within a sequence length window.
 \] 
 
 When you use this strategy, you much call the following rnn function to save states between 
-matrices 
+matrices (this only needs to be done once at initialization of the model).
 
 \begin{lstlisting}
 model:remember('both')
 \end{lstlisting}
 
-While this method has a fixed backprop length of $s$, with a reasonable 
-size $s$ it works well in practice. Unfortunately it is quite slow since 
+While this method has a fixed backprop length of $l$, with a reasonable 
+size $l$ it works well in practice. Unfortunately it is quite slow since 
 we cannot use a batch (sequential processing). To get around this issue 
 we split the sequence into $b$ parts and fold them over each other. 
 
@@ -157,7 +175,7 @@ we split the sequence into $b$ parts and fold them over each other.
 \[
   \begin{bmatrix}
     w_1 & w_2 & \ldots & w_{l}\\
-    w_{n/b+1} & w_{n/b+1} & \ldots & w_{n/b+l}\\
+    w_{n/b+1} & w_{n/b+2} & \ldots & w_{n/b+l}\\
     \vdots \\
     w_{(b-1)n/b + 1} & w_{(b-1)n/b+2} & \ldots & w_{(b-1)n/b+l}
   \end{bmatrix}   \begin{bmatrix}
@@ -176,9 +194,9 @@ we split the sequence into $b$ parts and fold them over each other.
 \] 
 
 This allows both batching and backprop with a fixed length. Note
-though that the hidden states at first timestep ($\bolds_{n/b+1}$)
+though that the hidden states at first timestep ($w_{n/b+1}$)
 will be incorrect since they get computed before their correct
-previous hidden ($\bolds_{n/b}$). However this is tolerable since it
+previous hidden ($w_{n/b}$). However this is tolerable since it
 only leads to $b$ incorrect hidden states during training.
 
 
@@ -300,6 +318,9 @@ Once you have these vectors you should do the following:
 \begin{itemize}
 \item To begin you should initialize all the params to be uniform between $-0.05$ and $0.05$.
 \item Before updating your parameters, you should perform gradient normalization with max norm $5$.
+\item (Optional) Use the perplexity of the validation set as a guide for the learning rate. If the 
+  validation perplexity does not decrease, then half the current value of the learning rate. This 
+  can be useful for dynamically finding a good rate.
 \end{itemize}
 
 Once you have the model, use it in the greedy fashion described above. 
@@ -316,11 +337,12 @@ open-ended, but suggestion include:
 \begin{itemize}
 \item Compare performance between the LSTM, RNN and GRU on this task
 
-\item Experiment with stack LSTM and dropout. The rnn library provides details for how to implement this. Also see \cite{}. 
+\item Experiment with the stack LSTM and dropout. The rnn library provides details for how to implement this. 
 \item Try implementing a bidirectional LSTM for prediction. This model is provided by the rnn library. In this model you do not need to do greedy search, however you will 
   have to change your training such that you do not see the spaces in the data.
-\item Experiment with different optimization techniques. For instance see the \texttt{optim} package. 
-
+\item Try using your LSTM for language modeling on the previous
+  homework (HW3). You should be able to use basically the same setup
+  for this problem but with words instead of characters. Likely you will want to run this on the GPU.
 \end{itemize}
 
 \section{Report and Submission}
