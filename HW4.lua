@@ -9,13 +9,14 @@ cmd = torch.CmdLine()
 -- Cmd Args
 cmd:option('-datafile', '', 'data file')
 cmd:option('-classifier', 'lstm', 'classifier to use')
+cmd:option('-model_out_name', 'PTB', 'model output name to use')
 
 -- Hyperparameters
 cmd:option('-eta', 0.01, 'learning rate for SGD')
 cmd:option('-max_epochs', 20, 'max epochs for NN training')
 
 cmd:option('-backprop_length', 100, 'backprop length for RNN')
-cmd:option('-batch_size', 5, 'batch size for RNN')
+cmd:option('-batch_size', 300, 'batch size for RNN')
 cmd:option('-hidden_size', 100, 'hidden size for RNN')
 
 function rnn_reshape(arr, backprop_length, batch_size)
@@ -27,17 +28,21 @@ function rnn_reshape(arr, backprop_length, batch_size)
 end
 
 function LSTM_model(input_size, hidden_size)
+
    local model = nn.Sequential()
 
+   local stepmodel = nn.Sequential()
+
    local rnn = nn.Sequential()
-   rnn:add(nn.FastLSTM(input_size, hidden_size))
-   model:add(rnn)
+   rnn:add(nn.FastLSTM(1, hidden_size))
+   stepmodel:add(rnn)
 
    local output = nn.Sequential()
-   output:add(nn.Linear(input_size, 2))
+   output:add(nn.Linear(hidden_size, 2))
    output:add(nn.LogSoftMax())
-   model:add(output)
+   stepmodel:add(output)
 
+   model:add(nn.Sequencer(stepmodel))
    model:remember('both')
 
    return model
@@ -51,7 +56,7 @@ function train_LSTM_model(X, Y, valid_X, valid_Y)
    local hidden_size = opt.hidden_size
 
    local model = LSTM_model(backprop_length, hidden_size)
-   local criterion = nn.ClassNLLCriterion()
+   local criterion = nn.SequencerCriterion(nn.ClassNLLCriterion())
 
    -- call once
    local params, grads = model:getParameters()
@@ -62,47 +67,54 @@ function train_LSTM_model(X, Y, valid_X, valid_Y)
    -- sgd state
    local state = { learningRate = eta }
 
-   local prev_loss = 1e10
-   local epoch = 1
-   local timer = torch.Timer()
-   while epoch <= max_epochs do
-      print('Epoch:', epoch)
-      local epoch_time = timer:time().real
-      local total_loss = 0
+   local total_loss = 0
 
-      model:training()
-      for i = 1, #X do
-        local X_batch = X[i]
-        local Y_batch = Y[i]
+   model:training()
+   for i = 1, #X do
+      print('Batch Number:', i, 'of', #X)
+      print(X[i]:size())
+      local X_batch = X[i]:split(1, 2)
+      local Y_batch = Y[i]:split(1, 2)
 
-        -- closure to return err, df/dx
-        local func = function(x)
-          -- get new parameters
-          if x ~= params then
-            params:copy(x)
-          end
-          -- reset gradients
-          grads:zero()
-
-          -- forward step
-          local inputs = X_batch
-          local outputs = model:forward(inputs)
-          local loss = criterion:forward(outputs, Y_batch)
-
-          -- track errors
-          total_loss = total_loss + loss * batch_size
-
-          -- compute gradients
-          local df_dz = criterion:backward(outputs, Y_batch)
-          model:backward(inputs, df_dz)
-
-          return loss, grads
-        end
-
-        optim.sgd(func, params, state)
+      -- process Y_batch
+      for j = 1, #Y_batch do
+        Y_batch[j] = Y_batch[j]:squeeze()
       end
+
+      -- closure to return err, df/dx
+      local func = function(x)
+        -- get new parameters
+        if x ~= params then
+          params:copy(x)
+        end
+        -- reset gradients
+        grads:zero()
+
+        -- forward step
+        local inputs = X_batch
+        local outputs = model:forward(inputs)
+        local loss = criterion:forward(outputs, Y_batch)
+
+        -- track errors
+        total_loss = total_loss + loss * batch_size
+
+        -- compute gradients
+        local df_dz = criterion:backward(outputs, Y_batch)
+        model:backward(inputs, df_dz)
+
+        -- renormalize gradients
+        -- print(grads)
+        -- grads:renorm(2, 1, 5)
+        print(grads:norm(2))
+
+        return loss, grads
+      end
+
+      optim.sgd(func, params, state)
+      torch.save(opt.model_out_name .. '_' .. opt.classifier .. '.t7', { model = model })
    end
-   
+
+   return model
 end
 
 function main() 
@@ -128,8 +140,8 @@ function main()
 
      local hidden_size = opt.hidden_size
      local max_epochs = opt.max_epochs
-     local model = LSTM_model(backprop_length, hidden_size)
-     -- train_LSTM_model(X, Y, backprop_length, hidden_size, max_epochs)
+     -- local model = LSTM_model(backprop_length, hidden_size)
+     local model = train_LSTM_model(X, Y)
    end
 
    -- Test.
