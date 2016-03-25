@@ -32,6 +32,54 @@ cmd:option('-backprop_length', 100, 'backprop length for RNN')
 cmd:option('-batch_size', 300, 'batch size for RNN')
 cmd:option('-hidden_size', 100, 'hidden size for RNN')
 
+function greedy_search(X, CM, model)
+  local gram_size = opt.gram_size
+  local spaces = {}
+
+  local context
+  local is_space = false
+  local i = 1
+  while i <= X:size(1) - gram_size + 1 do
+    if i == 1 then
+      context = X:narrow(1, 1, gram_size - 1)
+      i = gram_size
+    else
+      if is_space then
+        -- Last predicted space
+        context = torch.cat(context:narrow(1, 2, context:size(1) - 1), torch.LongTensor{space_char}) 
+        is_space = false
+      else
+        context = torch.cat(context:narrow(1, 2, context:size(1) - 1), torch.LongTensor{X[i]}) 
+        i = i + 1
+      end
+    end
+
+    -- Evaluate
+    if CM then
+      local h = hash(context)
+      if CM[h] and CM[h][2] then
+        if CM[h][1] == nil or CM[h][2] > CM[h][1] then
+          -- Predict space
+          is_space = true
+          table.insert(spaces, i)
+        end
+      end
+    elseif model then
+      local pred = model:forward(context)
+      if pred[2] > pred[1] then
+        is_space = true
+        table.insert(spaces, i)
+      end
+    end
+  end
+
+  return spaces
+end
+
+function dp_search(X, CM, model)
+
+end
+
 function X_to_context(X, gram_size)
   local context = torch.Tensor(X:size(1) - gram_size + 2, gram_size-1)
   for i = gram_size - 1, X:size(1) do
@@ -47,19 +95,6 @@ function hash(context)
     total = total + (context[i] - 1) * (vocab_size ^ (context:size(1)-i))
   end
   return total
-end
-
-function unhash(X_idx)
-  -- Converts index to ngram context
-  local X = torch.zeros(X_idx:size(1), ngram_size - 1)
-  for i = 1, X:size(1) do
-      local idx = X_idx[i][1]
-      for j = 1, ngram_size - 1 do
-        X[i][j] = math.mod(idx, vocab_size) + 1
-        idx = (idx - context[i]) / vocab_size
-      end
-  end
-  return X
 end
 
 function make_count_matrix(X, Y, gram_size)
@@ -342,12 +377,13 @@ function main()
    -- Parse input params
    opt = cmd:parse(arg)
    local f = hdf5.open(opt.datafile, 'r')
-   local X_arr = f:read('train_input'):all():double()
-   local Y_arr = f:read('train_output'):all()
-   local valid_X_arr = f:read('valid_input'):all()
-   local valid_Y_arr = f:read('valid_output'):all()
-   local test_X_arr = f:read('test_input'):all()
+   local X_arr = f:read('train_input'):all():long()
+   local Y_arr = f:read('train_output'):all():long()
+   local valid_X_arr = f:read('valid_input'):all():long()
+   local valid_Y_arr = f:read('valid_output'):all():long()
+   local test_X_arr = f:read('test_input'):all():long()
    vocab_size = f:read('vocab_size'):all():long()[1]
+   space_char = f:read('space_char'):all():long()[1]
 
    local backprop_length = opt.backprop_length
    local batch_size = opt.batch_size
@@ -364,8 +400,6 @@ function main()
 
      local preds = eval_count_model(X, Y, CM, gram_size)
      local valid_preds = eval_count_model(valid_X, valid_Y, CM, gram_size)
-     print(preds:narrow(1, 1, 10))
-     print(valid_preds:narrow(1, 1, 10))
 
      local train_nll = nn.ClassNLLCriterion():forward(preds:log(), Y)
      local valid_nll = nn.ClassNLLCriterion():forward(valid_preds:log(), valid_Y)
@@ -373,6 +407,12 @@ function main()
      print('Valid perplexity:', torch.exp(valid_nll))
 
      -- Test
+     local spaces = greedy_search(test_X_arr, CM, nil)
+     -- Write space locations
+     local space_f = io.open('test_spaces_count.txt', 'w')
+     for i,v in ipairs(spaces) do
+       space_f:write(v .. "\n")
+     end
 
    elseif opt.classifier == 'nnlm' then
      local X = X_to_context(X_arr, gram_size)
