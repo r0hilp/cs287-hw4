@@ -47,7 +47,10 @@ def convert_data(data_name, char_to_idx):
 
 FILE_PATHS = {"PTB": ("data/train_chars.txt",
                       "data/valid_chars.txt",
-                      "data/test_chars.txt")}
+                      "data/test_chars.txt"),
+              "PTB_check": ("data/train_check.txt",
+                            "data/valid_check.txt",
+                            "data/test_check.txt")}
 args = {}
 
 def main(arguments):
@@ -93,6 +96,8 @@ def main(arguments):
             f['valid_output'] = valid_output
         if test:
             f['test_input'] = test_input
+        f['vocab_size'] = np.array([len(char_to_idx)], dtype=np.int32)
+        f['space_char'] = np.array([char_to_idx['<space>']], dtype=np.int32)
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))
