@@ -10,14 +10,16 @@ cmd = torch.CmdLine()
 cmd:option('-datafile', '', 'data file')
 cmd:option('-classifier', 'lstm', 'classifier to use')
 cmd:option('-model_out_name', 'PTB', 'model output name to use')
+cmd:option('-warm_start', '', 'model to start from')
 
 -- Hyperparameters
 cmd:option('-eta', 0.01, 'learning rate for SGD')
 cmd:option('-max_epochs', 20, 'max epochs for NN training')
 
 cmd:option('-backprop_length', 100, 'backprop length for RNN')
-cmd:option('-batch_size', 300, 'batch size for RNN')
+cmd:option('-batch_size', 32, 'batch size for RNN')
 cmd:option('-hidden_size', 100, 'hidden size for RNN')
+cmd:option('-eval_mode', 'greedy', 'evaluation mode for RNN')
 
 function rnn_reshape(arr, backprop_length, batch_size)
   -- Reshape into a table of (N / batch_size) x backprop_length tensors
@@ -27,35 +29,87 @@ function rnn_reshape(arr, backprop_length, batch_size)
   return arr:reshape(batch_size, math.floor(N/batch_size)):split(backprop_length, 2)
 end
 
-function LSTM_model(input_size, hidden_size)
+function LSTM_model(hidden_size, vocab_size, embed_dim)
+   if opt.warm_start ~= '' then
+     return torch.load(opt.warm_start).model
+   end
 
    local model = nn.Sequential()
+   model:add(nn.LookupTable(vocab_size, embed_dim))
+   model:add(nn.SplitTable(1, 3))
 
-   local stepmodel = nn.Sequential()
+   local stepmodule = nn.Sequential()
 
    local rnn = nn.Sequential()
-   rnn:add(nn.FastLSTM(1, hidden_size))
-   stepmodel:add(rnn)
+   rnn:add(nn.LSTM(embed_dim, hidden_size))
+   stepmodule:add(rnn)
 
    local output = nn.Sequential()
    output:add(nn.Linear(hidden_size, 2))
    output:add(nn.LogSoftMax())
-   stepmodel:add(output)
+   stepmodule:add(output)
 
-   model:add(nn.Sequencer(stepmodel))
+   model:add(nn.Sequencer(stepmodule))
    model:remember('both')
 
    return model
 end
 
-function train_LSTM_model(X, Y, valid_X, valid_Y)
+-- Currently broken
+function model_eval(model, criterion, X, Y, X_answers)
+  -- batch evaluation
+  model:evaluate()
+  if opt.eval_mode == 'greedy' then
+    -- join and flatten out the inputs
+    X_arr = nn.JoinTable(2):forward(X)
+    Y_arr = nn.JoinTable(2):forward(Y)
+    X_arr = nn.Reshape(X_arr:size(1)*X_arr:size(2)):forward(X_arr)
+    Y_arr = nn.Reshape(Y_arr:size(1)*Y_arr:size(2)):forward(Y_arr)
+
+    -- array to store output, which we will join into a tensor later
+    local output_arr = {}
+
+    local total_correct = 0
+    local idx = 1
+    local next_char = X[idx]
+    while idx <= X:size(1) do
+
+      -- feed element into RNN
+      local output = model:forward(next_char)
+      if output == Y[idx] then
+        total_correct = total_correct + 1
+      end
+
+      -- increment index
+      idx = idx + 1
+
+      -- if output is space feed in a space
+      if output == 2 then
+         next_char = space 
+      else
+         next_char = X[idx]
+      end
+      local X_batch = X[i]:split(1, 2) 
+      local Y_batch = Y[i]:split(1, 2)
+      local outputs = model:forward(X_batch)
+
+    local loss = criterion:forward(outputs, Y_batch)
+    total_loss = total_loss + loss * batch_size
+  end
+
+  end
+  
+  return total_loss / N
+end
+
+function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim)
    local eta = opt.eta
    local max_epochs = opt.max_epochs
    local batch_size = opt.batch_size
    local backprop_length = opt.backprop_length
    local hidden_size = opt.hidden_size
 
-   local model = LSTM_model(backprop_length, hidden_size)
+   local model = LSTM_model(hidden_size, vocab_size, embed_dim)
    local criterion = nn.SequencerCriterion(nn.ClassNLLCriterion())
 
    -- call once
@@ -72,14 +126,8 @@ function train_LSTM_model(X, Y, valid_X, valid_Y)
    model:training()
    for i = 1, #X do
       print('Batch Number:', i, 'of', #X)
-      print(X[i]:size())
-      local X_batch = X[i]:split(1, 2)
-      local Y_batch = Y[i]:split(1, 2)
-
-      -- process Y_batch
-      for j = 1, #Y_batch do
-        Y_batch[j] = Y_batch[j]:squeeze()
-      end
+      local X_batch = X[i]:t()
+      local Y_batch = Y[i]:t()
 
       -- closure to return err, df/dx
       local func = function(x)
@@ -102,10 +150,10 @@ function train_LSTM_model(X, Y, valid_X, valid_Y)
         local df_dz = criterion:backward(outputs, Y_batch)
         model:backward(inputs, df_dz)
 
-        -- renormalize gradients
-        -- print(grads)
-        -- grads:renorm(2, 1, 5)
-        print(grads:norm(2))
+        -- renormalize gradients with max norm 5
+        local max_grad_norm = math.abs(grads:max())
+        grads:mul(5):div(max_grad_norm)
+        print('Gradient Norm:', grads:norm(2))
 
         return loss, grads
       end
@@ -121,27 +169,29 @@ function main()
    -- Parse input params
    opt = cmd:parse(arg)
    local f = hdf5.open(opt.datafile, 'r')
-   local X_arr = f:read('train_input'):all():double()
-   local Y_arr = f:read('train_output'):all()
-   local valid_X_arr = f:read('valid_input'):all()
-   local valid_Y_arr = f:read('valid_output'):all()
-   local test_X_arr = f:read('test_input'):all()
+   local X = f:read('train_input'):all()
+   local Y = f:read('train_output'):all()
+   local valid_X = f:read('valid_input'):all()
+   local valid_Y = f:read('valid_output'):all()
+   local test_X = f:read('test_input'):all()
+   local vocab_size = f:read('V'):all()[1]
 
    local backprop_length = opt.backprop_length
    local batch_size = opt.batch_size
+   local embed_dim = 6 -- change this??
 
    -- Train.
    if opt.classifier == 'lstm' then
-     local X = rnn_reshape(X_arr, backprop_length, batch_size)
-     local Y = rnn_reshape(Y_arr, backprop_length, batch_size)
-     local valid_X = rnn_reshape(valid_X_arr, backprop_length, batch_size)
-     local valid_Y = rnn_reshape(valid_Y_arr, backprop_length, batch_size)
-     local test_X = rnn_reshape(test_X_arr, backprop_length, batch_size)
+     X = rnn_reshape(X, backprop_length, batch_size)
+     Y = rnn_reshape(Y, backprop_length, batch_size)
+     valid_X = rnn_reshape(valid_X, backprop_length, batch_size)
+     valid_Y = rnn_reshape(valid_Y, backprop_length, batch_size)
+     test_X = rnn_reshape(test_X, backprop_length, batch_size)
 
      local hidden_size = opt.hidden_size
      local max_epochs = opt.max_epochs
-     -- local model = LSTM_model(backprop_length, hidden_size)
-     local model = train_LSTM_model(X, Y)
+
+     local model = train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, 6)
    end
 
    -- Test.
