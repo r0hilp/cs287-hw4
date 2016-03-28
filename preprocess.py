@@ -68,6 +68,8 @@ def main(arguments):
     # Retrive word to id mapping
     print 'Get char ids...'
     char_to_idx = get_char_ids([train, valid, test], dataset=dataset)
+    V = len(char_to_idx)
+    print 'Vocab size: ' + str(V)
 
     # Convert data
     print 'Processing data...'
@@ -85,6 +87,7 @@ def main(arguments):
     with h5py.File(filename, "w") as f:
         f['train_input'] = train_input
         f['train_output'] = train_output
+        f['V'] = np.array([V], dtype=np.int32)
         if valid:
             f['valid_input'] = valid_input
             f['valid_output'] = valid_output
