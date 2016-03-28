@@ -10,7 +10,6 @@ cmd = torch.CmdLine()
 cmd:option('-datafile', '', 'data file')
 cmd:option('-classifier', 'lstm', 'classifier to use')
 cmd:option('-model_out_name', 'PTB', 'model output name to use')
-cmd:option('-warm_start', '', 'model to start from')
 
 cmd:option('-warm_start', '', 'torch file with previous model')
 cmd:option('-model_out_name', 'train', 'output file name of model')
@@ -312,50 +311,43 @@ function LSTM_model(hidden_size, vocab_size, embed_dim)
 end
 
 -- Currently broken
-function model_eval(model, criterion, X, Y, X_answers)
+function rnn_model_eval(model, criterion, X_arr, Y_arr, space_char)
   -- batch evaluation
   model:evaluate()
-  if opt.eval_mode == 'greedy' then
-    -- join and flatten out the inputs
-    X_arr = nn.JoinTable(2):forward(X)
-    Y_arr = nn.JoinTable(2):forward(Y)
-    X_arr = nn.Reshape(X_arr:size(1)*X_arr:size(2)):forward(X_arr)
-    Y_arr = nn.Reshape(Y_arr:size(1)*Y_arr:size(2)):forward(Y_arr)
 
-    -- array to store output, which we will join into a tensor later
-    local output_arr = {}
+  local preds = torch.Tensor(Y_arr:size())
+
+  if opt.eval_mode == 'greedy' then
+
+    -- array to store output
+    local output_seq = {}
 
     local total_correct = 0
     local idx = 1
-    local next_char = X[idx]
-    while idx <= X:size(1) do
-
+    local next_char = torch.Tensor({X_arr[1]})
+    while idx <= X_arr:size(1) do
       -- feed element into RNN
-      local output = model:forward(next_char)
-      if output == Y[idx] then
-        total_correct = total_correct + 1
-      end
-
-      -- increment index
-      idx = idx + 1
-
-      -- if output is space feed in a space
-      if output == 2 then
-         next_char = space 
+      local out = nn.JoinTable(1):forward(model:forward(next_char))
+      -- print(nn.Reshape(out:size(1), 1):forward(out))
+      output_seq[idx] = nn.Reshape(1, out:size(1)):forward(out)
+      local _, argmax = out:max()
+      if argmax == 2 then
+        next_char = torch.Tensor({space_char})
       else
-         next_char = X[idx]
+        next_char = torch.Tensor({X_arr[idx]})
       end
-      local X_batch = X[i]:split(1, 2) 
-      local Y_batch = Y[i]:split(1, 2)
-      local outputs = model:forward(X_batch)
+      idx = idx + 1
+    end
 
-    local loss = criterion:forward(outputs, Y_batch)
-    total_loss = total_loss + loss * batch_size
+    preds = nn.JoinTable(1):forward(output_seq)
+    --print(preds)
   end
 
-  end
-  
-  return total_loss / N
+  local _, argmax = preds:max(2)
+  local correct = argmax:squeeze():eq(Y_arr):sum()/Y_arr:size(1)
+  local loss = criterion:forward(preds, Y_arr)
+
+  return loss, correct
 end
 
 function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim)
@@ -425,7 +417,6 @@ function main()
    -- Parse input params
    opt = cmd:parse(arg)
    local f = hdf5.open(opt.datafile, 'r')
-<<<<<<< HEAD
    local X = f:read('train_input'):all()
    local Y = f:read('train_output'):all()
    local valid_X = f:read('valid_input'):all()
@@ -493,7 +484,11 @@ function main()
      local hidden_size = opt.hidden_size
      local max_epochs = opt.max_epochs
 
-     local model = train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, 6)
+     local model = LSTM_model(1, 1)--train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, 6)
+     local a = torch.Tensor({1})
+     print(a)
+     print(nn.JoinTable(1):forward(model:forward(a)))
+     rnn_model_eval(model, nn.ClassNLLCriterion(), valid_X_arr, valid_Y_arr, space_char)
    end
 
 end
