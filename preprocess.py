@@ -90,13 +90,12 @@ def main(arguments):
     with h5py.File(filename, "w") as f:
         f['train_input'] = train_input
         f['train_output'] = train_output
-        f['V'] = np.array([V], dtype=np.int32)
         if valid:
             f['valid_input'] = valid_input
             f['valid_output'] = valid_output
         if test:
             f['test_input'] = test_input
-        f['vocab_size'] = np.array([len(char_to_idx)], dtype=np.int32)
+        f['vocab_size'] = np.array([V], dtype=np.int32)
         f['space_char'] = np.array([char_to_idx['<space>']], dtype=np.int32)
 
 if __name__ == '__main__':

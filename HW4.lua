@@ -29,6 +29,7 @@ cmd:option('-L2s', 1, 'normalize L2 of word embeddings')
 cmd:option('-embed', 15, 'size of word embeddings')
 cmd:option('-hidden', 100, 'size of hidden layer for neural network')
 
+cmd:option('-max_grad', 5, 'maximum gradient for renormalization')
 cmd:option('-backprop_length', 100, 'backprop length for RNN')
 cmd:option('-batch_size', 32, 'batch size for RNN')
 cmd:option('-hidden_size', 100, 'hidden size for RNN')
@@ -79,7 +80,28 @@ function greedy_search(X, CM, model)
 end
 
 function dp_search(X, CM, model)
+  -- For bigrams only
+  assert(opt.gram_size == 2)  
+  --local pi = torch.LongTensor(2, X:size(1)):fill(-1000)
+  --local bp = torch.zeros(1, X:size(1)):long()
 
+  --pi[1][1] = 0
+  --pi[1][2] = 0
+  --for i = 2, X:size(1) do
+    --local context = torch.LongTensor{X[i]}
+
+    ---- Evaluate
+    --if CM then
+      --local h = hash(context)
+      --for c = 1, 2 do
+        --score = pi[i-1][c]
+
+    --elseif model then
+    --end
+  --end
+
+  --local spaces = {}
+  --return spaces
 end
 
 function X_to_context(X, gram_size)
@@ -156,7 +178,7 @@ function NNLM()
   return model
 end
 
-function model_eval(model, criterion, X, Y)
+function eval_nnlm(model, criterion, X, Y)
     -- batch eval
     model:evaluate()
     local N = X:size(1)
@@ -201,7 +223,6 @@ function train_nnlm(X, Y, valid_X, valid_Y)
       print('Epoch:', epoch)
       local epoch_time = timer:time().real
       local total_loss = 0
-      local total_correct = 0
 
       -- shuffle for batches
       local shuffle = torch.randperm(N):long()
@@ -260,7 +281,7 @@ function train_nnlm(X, Y, valid_X, valid_Y)
 
       print('Train perplexity:', torch.exp(total_loss / N))
 
-      local loss = model_eval(model, criterion, valid_X, valid_Y)
+      local loss = eval_nnlm(model, criterion, valid_X, valid_Y)
       print('Valid perplexity:', torch.exp(loss))
 
       print('time for one epoch: ', (timer:time().real - epoch_time) * 1000, 'ms')
@@ -297,7 +318,7 @@ function LSTM_model(hidden_size, vocab_size, embed_dim)
    local stepmodule = nn.Sequential()
 
    local rnn = nn.Sequential()
-   rnn:add(nn.LSTM(embed_dim, hidden_size))
+   rnn:add(nn.FastLSTM(embed_dim, hidden_size))
    stepmodule:add(rnn)
 
    local output = nn.Sequential()
@@ -315,44 +336,42 @@ end
 function model_eval(model, criterion, X, Y, X_answers)
   -- batch evaluation
   model:evaluate()
-  if opt.eval_mode == 'greedy' then
-    -- join and flatten out the inputs
-    X_arr = nn.JoinTable(2):forward(X)
-    Y_arr = nn.JoinTable(2):forward(Y)
-    X_arr = nn.Reshape(X_arr:size(1)*X_arr:size(2)):forward(X_arr)
-    Y_arr = nn.Reshape(Y_arr:size(1)*Y_arr:size(2)):forward(Y_arr)
 
-    -- array to store output, which we will join into a tensor later
-    local output_arr = {}
+  -- join and flatten out the inputs
+  X_arr = nn.JoinTable(2):forward(X)
+  Y_arr = nn.JoinTable(2):forward(Y)
+  X_arr = nn.Reshape(X_arr:size(1)*X_arr:size(2)):forward(X_arr)
+  Y_arr = nn.Reshape(Y_arr:size(1)*Y_arr:size(2)):forward(Y_arr)
 
-    local total_correct = 0
-    local idx = 1
-    local next_char = X[idx]
-    while idx <= X:size(1) do
+  -- array to store output, which we will join into a tensor later
+  local output_arr = {}
 
-      -- feed element into RNN
-      local output = model:forward(next_char)
-      if output == Y[idx] then
-        total_correct = total_correct + 1
-      end
+  local total_correct = 0
+  local idx = 1
+  local next_char = X[idx]
+  while idx <= X:size(1) do
 
-      -- increment index
-      idx = idx + 1
+    -- feed element into RNN
+    local output = model:forward(next_char)
+    if output == Y[idx] then
+      total_correct = total_correct + 1
+    end
 
-      -- if output is space feed in a space
-      if output == 2 then
-         next_char = space 
-      else
-         next_char = X[idx]
-      end
-      local X_batch = X[i]:split(1, 2) 
-      local Y_batch = Y[i]:split(1, 2)
-      local outputs = model:forward(X_batch)
+    -- increment index
+    idx = idx + 1
+
+    -- if output is space feed in a space
+    if output == 2 then
+       next_char = space 
+    else
+       next_char = X[idx]
+    end
+    local X_batch = X[i]:split(1, 2) 
+    local Y_batch = Y[i]:split(1, 2)
+    local outputs = model:forward(X_batch)
 
     local loss = criterion:forward(outputs, Y_batch)
     total_loss = total_loss + loss * batch_size
-  end
-
   end
   
   return total_loss / N
@@ -364,6 +383,7 @@ function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim)
    local batch_size = opt.batch_size
    local backprop_length = opt.backprop_length
    local hidden_size = opt.hidden_size
+   local N = X:size(1)
 
    local model = LSTM_model(hidden_size, vocab_size, embed_dim)
    local criterion = nn.SequencerCriterion(nn.ClassNLLCriterion())
@@ -372,51 +392,75 @@ function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim)
    local params, grads = model:getParameters()
    
    -- initialize params to uniform between -0.05, 0.05
-   params = torch.rand(params:size()):div(10):csub(0.05)
+   params:uniform(-0.05, 0.05)
 
    -- sgd state
    local state = { learningRate = eta }
 
-   local total_loss = 0
 
-   model:training()
-   for i = 1, #X do
-      print('Batch Number:', i, 'of', #X)
-      local X_batch = X[i]:t()
-      local Y_batch = Y[i]:t()
+   local prev_loss = 1e10
+   local epoch = 1
+   local timer = torch.Timer()
+   while epoch <= max_epochs do
+     print('Epoch:', epoch)
+     local epoch_time = timer:time().real
+     local total_loss = 0
 
-      -- closure to return err, df/dx
-      local func = function(x)
-        -- get new parameters
-        if x ~= params then
-          params:copy(x)
+     model:training()
+     for i = 1, #X do
+        print('Batch Number:', i, 'of', #X)
+        local X_batch = X[i]:t()
+        local Y_batch = Y[i]:t()
+
+        -- closure to return err, df/dx
+        local func = function(x)
+          -- get new parameters
+          if x ~= params then
+            params:copy(x)
+          end
+          -- reset gradients
+          grads:zero()
+
+          -- forward step
+          local inputs = X_batch
+          local outputs = model:forward(inputs)
+          local loss = criterion:forward(outputs, Y_batch)
+
+          -- track errors
+          total_loss = total_loss + loss * batch_size -- change this!!!!!!
+
+          -- compute gradients
+          local df_do = criterion:backward(outputs, Y_batch)
+          model:backward(inputs, df_do)
+
+          -- renormalize gradients with max norm 5
+          local max_grad_norm = math.abs(grads:max())
+          if max_grad_norm > opt.max_grad then
+            grads:mul(opt.max_grad):div(max_grad_norm)
+          end
+
+          return loss, grads
         end
-        -- reset gradients
-        grads:zero()
 
-        -- forward step
-        local inputs = X_batch
-        local outputs = model:forward(inputs)
-        local loss = criterion:forward(outputs, Y_batch)
-
-        -- track errors
-        total_loss = total_loss + loss * batch_size
-
-        -- compute gradients
-        local df_dz = criterion:backward(outputs, Y_batch)
-        model:backward(inputs, df_dz)
-
-        -- renormalize gradients with max norm 5
-        local max_grad_norm = math.abs(grads:max())
-        grads:mul(5):div(max_grad_norm)
-        print('Gradient Norm:', grads:norm(2))
-
-        return loss, grads
+        optim.sgd(func, params, state)
       end
 
-      optim.sgd(func, params, state)
+      print('Train perplexity:', torch.exp(total_loss / N))
+
+      --local loss = eval_nnlm(model, criterion, valid_X, valid_Y)
+      --print('Valid perplexity:', torch.exp(loss))
+
+      print('time for one epoch: ', (timer:time().real - epoch_time) * 1000, 'ms')
+      print('')
+      --if loss > prev_loss and epoch > opt.min_epochs then
+        --prev_loss = loss
+        --break
+      --end
+      --prev_loss = loss
+      epoch = epoch + 1
       torch.save(opt.model_out_name .. '_' .. opt.classifier .. '.t7', { model = model })
-   end
+    end
+    print('Trained', epoch, 'epochs')
 
    return model
 end
@@ -425,19 +469,7 @@ function main()
    -- Parse input params
    opt = cmd:parse(arg)
    local f = hdf5.open(opt.datafile, 'r')
-<<<<<<< HEAD
-   local X = f:read('train_input'):all()
-   local Y = f:read('train_output'):all()
-   local valid_X = f:read('valid_input'):all()
-   local valid_Y = f:read('valid_output'):all()
-   local test_X = f:read('test_input'):all()
-   local vocab_size = f:read('V'):all()[1]
 
-   local backprop_length = opt.backprop_length
-   local batch_size = opt.batch_size
-   local embed_dim = 6 -- change this??
-
-   -- Train.
    local X_arr = f:read('train_input'):all():long()
    local Y_arr = f:read('train_output'):all():long()
    local valid_X_arr = f:read('valid_input'):all():long()
@@ -449,6 +481,7 @@ function main()
    local backprop_length = opt.backprop_length
    local batch_size = opt.batch_size
    local gram_size = opt.gram_size
+   local embed_dim = opt.embed
 
    -- Train.
    if opt.classifier == 'count' then
@@ -493,7 +526,7 @@ function main()
      local hidden_size = opt.hidden_size
      local max_epochs = opt.max_epochs
 
-     local model = train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, 6)
+     local model = train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim)
    end
 
 end
