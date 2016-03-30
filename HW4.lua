@@ -332,37 +332,34 @@ function LSTM_model(hidden_size, vocab_size, embed_dim)
 end
 
 -- Currently broken
-function rnn_model_eval(model, criterion, X_arr, Y_arr, space_char)
+function rnn_model_eval(model, criterion, X_arr, Y_arr)
   -- batch evaluation
   model:evaluate()
 
   local preds = torch.Tensor(Y_arr:size())
 
-  if opt.eval_mode == 'greedy' then
+  -- array to store output
+  local output_seq = {}
 
-    -- array to store output
-    local output_seq = {}
-
-    local total_correct = 0
-    local idx = 1
-    local next_char = torch.Tensor({X_arr[1]})
-    while idx <= X_arr:size(1) do
-      -- feed element into RNN
-      local out = nn.JoinTable(1):forward(model:forward(next_char))
-      -- print(nn.Reshape(out:size(1), 1):forward(out))
-      output_seq[idx] = nn.Reshape(1, out:size(1)):forward(out)
-      local _, argmax = out:max()
-      if argmax == 2 then
-        next_char = torch.Tensor({space_char})
-      else
-        next_char = torch.Tensor({X_arr[idx]})
-      end
-      idx = idx + 1
+  local total_correct = 0
+  local idx = 1
+  local next_char = torch.Tensor({X_arr[1]})
+  while idx <= X_arr:size(1) do
+    -- feed element into RNN
+    local out = nn.JoinTable(1):forward(model:forward(next_char))
+    -- print(nn.Reshape(out:size(1), 1):forward(out))
+    output_seq[idx] = nn.Reshape(1, out:size(1)):forward(out)
+    local _, argmax = out:max()
+    if argmax == 2 then
+      next_char = torch.Tensor({space_char})
+    else
+      next_char = torch.Tensor({X_arr[idx]})
     end
-
-    preds = nn.JoinTable(1):forward(output_seq)
-    --print(preds)
+    idx = idx + 1
   end
+
+  preds = nn.JoinTable(1):forward(output_seq)
+  --print(preds)
 
   local _, argmax = preds:max(2)
   local correct = argmax:squeeze():eq(Y_arr):sum()/Y_arr:size(1)
@@ -374,7 +371,6 @@ end
 function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim)
    local eta = opt.eta
    local max_epochs = opt.max_epochs
-   local batch_size = opt.batch_size
    local backprop_length = opt.backprop_length
    local hidden_size = opt.hidden_size
    local N = X:size(1)
@@ -391,7 +387,6 @@ function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim)
    -- sgd state
    local state = { learningRate = eta }
 
-
    local prev_loss = 1e10
    local epoch = 1
    local timer = torch.Timer()
@@ -402,9 +397,10 @@ function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim)
 
      model:training()
      for i = 1, #X do
-        print('Batch Number:', i, 'of', #X)
+        --print('Batch Number:', i, 'of', #X)
         local X_batch = X[i]:t()
         local Y_batch = Y[i]:t()
+        local sz = X_batch:size(2)
 
         -- closure to return err, df/dx
         local func = function(x)
@@ -421,13 +417,13 @@ function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim)
           local loss = criterion:forward(outputs, Y_batch)
 
           -- track errors
-          total_loss = total_loss + loss * batch_size -- change this!!!!!!
+          total_loss = total_loss + loss * sz
 
           -- compute gradients
           local df_do = criterion:backward(outputs, Y_batch)
           model:backward(inputs, df_do)
 
-          -- renormalize gradients with max norm 5
+          -- renormalize gradients with norm too big 
           local max_grad_norm = math.abs(grads:max())
           if max_grad_norm > opt.max_grad then
             grads:mul(opt.max_grad):div(max_grad_norm)
@@ -441,8 +437,8 @@ function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim)
 
       print('Train perplexity:', torch.exp(total_loss / N))
 
-      --local loss = eval_nnlm(model, criterion, valid_X, valid_Y)
-      --print('Valid perplexity:', torch.exp(loss))
+      local loss = rnn_model_eval(model, criterion, valid_X, valid_Y)
+      print('Valid perplexity:', torch.exp(loss))
 
       print('time for one epoch: ', (timer:time().real - epoch_time) * 1000, 'ms')
       print('')
@@ -520,11 +516,7 @@ function main()
      local hidden_size = opt.hidden_size
      local max_epochs = opt.max_epochs
 
-     local model = LSTM_model(1, 1)--train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, 6)
-     local a = torch.Tensor({1})
-     print(a)
-     print(nn.JoinTable(1):forward(model:forward(a)))
-     rnn_model_eval(model, nn.ClassNLLCriterion(), valid_X_arr, valid_Y_arr, space_char)
+     train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim)
    end
 
 end
