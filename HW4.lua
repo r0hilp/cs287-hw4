@@ -171,7 +171,7 @@ function NNLM()
 
   model:add(nn.Linear(opt.embed * window_size, opt.hidden))
   model:add(nn.Tanh())
-  model:add(nn.Linear(opt.hidden, vocab_size))
+  model:add(nn.Linear(opt.hidden, 2))
   model:add(nn.LogSoftMax())
 
   return model
@@ -184,6 +184,7 @@ function eval_nnlm(model, criterion, X, Y)
     local batch_size = opt.batch_size
 
     local total_loss = 0
+    local total_correct = 0
     for batch = 1, X:size(1), batch_size do
         local sz = batch_size
         if batch + batch_size > N then
@@ -194,10 +195,24 @@ function eval_nnlm(model, criterion, X, Y)
 
         local outputs = model:forward(X_batch)
         local loss = criterion:forward(outputs, Y_batch)
-        total_loss = total_loss + loss * batch_size
+        total_loss = total_loss + loss * sz
+        -- unfortunate pathology
+        local correct
+        if outputs:size():size() == 1 then
+          local _, argmax = outputs:max(1)
+          if argmax == Y_batch[1] then
+            correct = 1
+          else
+            correct = 0
+          end
+        else
+          local _, argmax = outputs:max(2)
+          correct = argmax:squeeze():eq(Y_batch):sum()
+        end
+        total_correct = total_correct + correct
     end
 
-    return total_loss / N
+    return total_loss / N, total_correct / N
 end
 
 function train_nnlm(X, Y, valid_X, valid_Y)
@@ -222,6 +237,7 @@ function train_nnlm(X, Y, valid_X, valid_Y)
       print('Epoch:', epoch)
       local epoch_time = timer:time().real
       local total_loss = 0
+      local total_correct = 0
 
       -- shuffle for batches
       local shuffle = torch.randperm(N):long()
@@ -261,6 +277,20 @@ function train_nnlm(X, Y, valid_X, valid_Y)
 
             -- track errors
             total_loss = total_loss + loss * batch_size
+            -- unfortunate pathology
+            local correct
+            if outputs:size():size() == 1 then
+              local _, argmax = outputs:max(1)
+              if argmax == Y_batch[1] then
+                correct = 1
+              else
+                correct = 0
+              end
+            else
+              local _, argmax = outputs:max(2)
+              correct = argmax:squeeze():eq(Y_batch):sum()
+            end
+            total_correct = total_correct + correct
 
             -- compute gradients
             local df_do = criterion:backward(outputs, Y_batch)
@@ -279,9 +309,11 @@ function train_nnlm(X, Y, valid_X, valid_Y)
       end
 
       print('Train perplexity:', torch.exp(total_loss / N))
+      print('Train percent:', total_correct / N)
 
-      local loss = eval_nnlm(model, criterion, valid_X, valid_Y)
+      local loss, percent = eval_nnlm(model, criterion, valid_X, valid_Y)
       print('Valid perplexity:', torch.exp(loss))
+      print('Valid percent:', percent)
 
       print('time for one epoch: ', (timer:time().real - epoch_time) * 1000, 'ms')
       print('')
@@ -302,7 +334,12 @@ function rnn_reshape(arr, backprop_length, batch_size)
   local N = arr:size(1)
   -- In case batch_size doesn't divide N
   arr = arr:narrow(1, 1, math.floor(N/batch_size) * batch_size)
-  return arr:reshape(batch_size, math.floor(N/batch_size)):split(backprop_length, 2)
+  local ret = arr:reshape(batch_size, math.floor(N/batch_size)):split(backprop_length, 2)
+  -- transpose precompute
+  for i,_ in ipairs(ret) do
+    ret[i] = ret[i]:t()
+  end
+  return ret
 end
 
 function LSTM_model(hidden_size, vocab_size, embed_dim)
@@ -331,36 +368,27 @@ function LSTM_model(hidden_size, vocab_size, embed_dim)
    return model
 end
 
-function rnn_model_perplexity(model, valid_X_arr, valid_Y_arr)
-
+function rnn_model_eval(model, criterion, X, Y)
+  -- batch evaluate
   model:evaluate()
+  local N = (#X - 1) * opt.backprop_length * opt.batch_size + X[#X]:size(1) * opt.batch_size
 
-  local preds = torch.Tensor(valid_Y_arr:size())
-
-  -- get perplexity
-  local output_seq = {}
-
-  local total_correct = 0
-  for i = 1, valid_X_arr:size(1) do
-    -- feed element into RNN
-    local out = nn.JoinTable(1):forward(model:forward(torch.Tensor({valid_X_arr[i]})))
-    -- print(nn.Reshape(out:size(1), 1):forward(out))
-    output_seq[i] = nn.Reshape(1, out:size(1)):forward(out)
-  end
-
-  preds = nn.JoinTable(1):forward(output_seq)
-  --print(preds)
-
-  local _, argmax = preds:max(2)
-  local correct = argmax:squeeze():eq(valid_Y_arr:long()):sum()/valid_Y_arr:size(1)
   local total_loss = 0
-  for i = 1, preds:size(1) do
-    total_loss = total_loss + preds[i][valid_Y_arr[i]]
-  end
-  local perplexity = torch.exp(total_loss / preds:size(1))
-  print("Perplexity:", perplexity)
+  local total_correct = 0
+  for i = 1, #X do
+      local X_batch = X[i]
+      local Y_batch = Y[i]
+      local sz = X_batch:size(2)
 
-  return perplexity
+      local outputs = model:forward(X_batch)
+      local loss = criterion:forward(outputs, Y_batch)
+      total_loss = total_loss + loss * sz
+      local _, argmax = nn.JoinTable(1):forward(outputs):max(2)
+      local correct = argmax:squeeze():eq(Y_batch):sum()
+      total_correct = total_correct + correct
+  end
+
+  return total_loss / N, total_correct / N
 end
 
 function rnn_model_kaggle(model, valid_kaggle_X_arr, space_char, sentence_char)
@@ -398,6 +426,7 @@ function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim, space_c
    local max_epochs = opt.max_epochs
    local backprop_length = opt.backprop_length
    local hidden_size = opt.hidden_size
+   local N = (#X - 1) * backprop_length * opt.batch_size + X[#X]:size(1) * opt.batch_size
 
    local model = LSTM_model(hidden_size, vocab_size, embed_dim)
    local criterion = nn.SequencerCriterion(nn.ClassNLLCriterion())
@@ -405,11 +434,10 @@ function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim, space_c
    -- call once
    local params, grads = model:getParameters()
    
-   -- initialize params to uniform between -0.05, 0.05
-   params:uniform(-0.05, 0.05)
-
-   -- sgd state
-   local state = { learningRate = eta }
+   if opt.warm_start == '' then
+     -- initialize params to uniform between -0.05, 0.05
+     params:uniform(-0.05, 0.05)
+   end
 
    local prev_loss = 1e10
    local epoch = 1
@@ -418,12 +446,16 @@ function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim, space_c
      print('Epoch:', epoch)
      local epoch_time = timer:time().real
      local total_loss = 0
+     local total_correct = 0
+
+     -- sgd state
+     local state = { learningRate = eta }
 
      model:training()
      for i = 1, #X do
         --print('Batch Number:', i, 'of', #X)
-        local X_batch = X[i]:t()
-        local Y_batch = Y[i]:t()
+        local X_batch = X[i]
+        local Y_batch = Y[i]
         local sz = X_batch:size(2)
 
         -- closure to return err, df/dx
@@ -442,6 +474,9 @@ function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim, space_c
 
           -- track errors
           total_loss = total_loss + loss * sz
+          local _, argmax = nn.JoinTable(1):forward(outputs):max(2)
+          local correct = argmax:squeeze():eq(Y_batch):sum()
+          total_correct = total_correct + correct
 
           -- compute gradients
           local df_do = criterion:backward(outputs, Y_batch)
@@ -459,29 +494,23 @@ function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim, space_c
         optim.sgd(func, params, state)
       end
 
-      --[[local valid_X_arr = nn.JoinTable(2):forward(valid_X)
-      valid_X_arr = nn.Reshape(valid_X_arr:size(1)*valid_X_arr:size(2)):forward(valid_X_arr)
-      local valid_Y_arr = nn.JoinTable(2):forward(valid_Y)
-      valid_Y_arr = nn.Reshape(valid_Y_arr:size(1)*valid_Y_arr:size(2)):forward(valid_Y_arr)]]
+      print('Train perplexity:', torch.exp(total_loss / N))
+      print('Train percent:', total_correct / N)
 
-      --model:evaluate()
-
-      -- local loss, correct = rnn_model_eval(model, nn.ClassNLLCriterion(), valid_X_arr, valid_Y_arr, space_char)
-      --print('Validation Perplexity:', loss)
-      --print('Validation Prediction Accuracy:', correct * 100)
-
-      --print('Train perplexity:', torch.exp(total_loss / #X))
-
-      local loss = rnn_model_eval(model, criterion, valid_X, valid_Y)
+      local loss, percent = rnn_model_eval(model, criterion, valid_X, valid_Y)
       print('Valid perplexity:', torch.exp(loss))
+      print('Valid percent:', percent)
 
       print('time for one epoch: ', (timer:time().real - epoch_time) * 1000, 'ms')
       print('')
-      --if loss > prev_loss and epoch > opt.min_epochs then
-        --prev_loss = loss
-        --break
-      --end
-      --prev_loss = loss
+
+      -- forget to restart sequence
+      model:forget()
+      if loss > prev_loss and epoch > opt.min_epochs then
+        -- halve learning rate
+        eta = eta / 2
+      end
+      prev_loss = loss
       epoch = epoch + 1
       torch.save(opt.model_out_name .. '_' .. opt.classifier .. '.t7', { model = model })
     end
@@ -554,8 +583,8 @@ function main()
      local max_epochs = opt.max_epochs
 
      local model = train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, opt.embed, space_char, sentence_char)
-     print(rnn_model_perplexity(model, valid_X_arr, valid_Y_arr))
-     print(rnn_model_kaggle(model, valid_kaggle_X_arr, space_char, sentence_char))
+     --print(rnn_model_perplexity(model, valid_X_arr, valid_Y_arr))
+     --print(rnn_model_kaggle(model, valid_kaggle_X_arr, space_char, sentence_char))
    end
 
 end
