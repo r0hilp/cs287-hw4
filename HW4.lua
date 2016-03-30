@@ -355,7 +355,7 @@ function rnn_model_perplexity(model, valid_X_arr, valid_Y_arr)
   local correct = argmax:squeeze():eq(valid_Y_arr:long()):sum()/valid_Y_arr:size(1)
   local total_loss = 0
   for i = 1, preds:size(1) do
-    total_loss = total_loss + -1 * preds[i][valid_Y_arr[i]]
+    total_loss = total_loss + preds[i][valid_Y_arr[i]]
   end
   local perplexity = torch.exp(total_loss / preds:size(1))
   print("Perplexity:", perplexity)
