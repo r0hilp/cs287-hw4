@@ -30,9 +30,10 @@ def convert_data(data_name, char_to_idx):
 
     # Construct input
     with open(data_name, "r") as f:
-        chars = f.read().strip().split()
-        for char in chars:
-            char_features.append(char_to_idx[char])
+        for line in f:
+            chars = line.strip().split()
+            for char in chars:
+                char_features.append(char_to_idx[char])
 
     # Construct output
     for i in range(len(char_features)-1):
@@ -40,6 +41,7 @@ def convert_data(data_name, char_to_idx):
             char_output.append(2)
         else:
             char_output.append(1)
+
     # EOF
     char_output.append(1)
 
@@ -47,10 +49,12 @@ def convert_data(data_name, char_to_idx):
 
 FILE_PATHS = {"PTB": ("data/train_chars.txt",
                       "data/valid_chars.txt",
-                      "data/test_chars.txt"),
+                      "data/test_chars.txt",
+                      "data/valid_chars_kaggle.txt"),
               "PTB_check": ("data/train_check.txt",
                             "data/valid_check.txt",
-                            "data/test_check.txt")}
+                            "data/test_check.txt",
+                            "data/valid_chars_kaggle.txt")}
 args = {}
 
 def main(arguments):
@@ -66,11 +70,11 @@ def main(arguments):
     dataset = args.dataset
     # backprop_length = args.backprop_length (take as input in training file)
     # batch_num = args.batch_num
-    train, valid, test = FILE_PATHS[dataset]
+    train, valid, test, valid_kaggle = FILE_PATHS[dataset]
 
     # Retrive word to id mapping
     print 'Get char ids...'
-    char_to_idx = get_char_ids([train, valid, test], dataset=dataset)
+    char_to_idx = get_char_ids([train, valid, test, valid_kaggle], dataset=dataset)
     V = len(char_to_idx)
     print 'Vocab size: ' + str(V)
 
@@ -84,6 +88,9 @@ def main(arguments):
     if test:
         test_input, _ = convert_data(test, char_to_idx)
 
+    if valid_kaggle:
+        valid_kaggle_input, _ = convert_data(valid_kaggle, char_to_idx)
+
     # Save data
     print 'Saving...'
     filename = dataset + '.hdf5'
@@ -95,8 +102,11 @@ def main(arguments):
             f['valid_output'] = valid_output
         if test:
             f['test_input'] = test_input
+        if valid_kaggle:
+            f['valid_kaggle_input'] = valid_kaggle_input
         f['vocab_size'] = np.array([V], dtype=np.int32)
         f['space_char'] = np.array([char_to_idx['<space>']], dtype=np.int32)
+        f['sentence_char'] = np.array([char_to_idx['</s>']], dtype=np.int32)
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))
