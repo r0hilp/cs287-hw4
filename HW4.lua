@@ -29,7 +29,7 @@ cmd:option('-embed', 15, 'size of word embeddings')
 cmd:option('-hidden', 100, 'size of hidden layer for neural network')
 
 cmd:option('-max_grad', 5, 'maximum gradient for renormalization')
-cmd:option('-backprop_length', 2000, 'backprop length for RNN')
+cmd:option('-backprop_length', 50, 'backprop length for RNN')
 cmd:option('-batch_size', 32, 'batch size for RNN')
 cmd:option('-hidden_size', 100, 'hidden size for RNN')
 cmd:option('-eval_mode', 'greedy', 'evaluation mode for RNN')
@@ -331,10 +331,11 @@ function LSTM_model(hidden_size, vocab_size, embed_dim)
    return model
 end
 
-function rnn_model_eval(model, criterion, valid_X_arr, valid_Y_arr, valid_X_kaggle_arr, valid_Y_kaggle_arr, space_char)
+function rnn_model_perplexity(model, valid_X_arr, valid_Y_arr)
+
   model:evaluate()
 
-  local preds = torch.Tensor(Y_arr:size())
+  local preds = torch.Tensor(valid_Y_arr:size())
 
   -- get perplexity
   local output_seq = {}
@@ -352,17 +353,26 @@ function rnn_model_eval(model, criterion, valid_X_arr, valid_Y_arr, valid_X_kagg
 
   local _, argmax = preds:max(2)
   local correct = argmax:squeeze():eq(valid_Y_arr:long()):sum()/valid_Y_arr:size(1)
-  local loss = criterion:forward(preds, valid_Y_arr)
-  local perplexity = torch.exp(loss / #output_seq)
+  local total_loss = 0
+  for i = 1, preds:size(1) do
+    total_loss = total_loss + -1 * preds[i][valid_Y_arr[i]]
+  end
+  local perplexity = torch.exp(total_loss / preds:size(1))
+  print("Perplexity:", perplexity)
 
-  model:forget()
+  return perplexity
+end
+
+function rnn_model_kaggle(model, valid_kaggle_X_arr, space_char, sentence_char)
+
+  model:evaluate()
 
   -- get spaces per sentence
   local spaces_per_sentence = {}
   spaces_per_sentence[1] = 0
   local curr_sentence = 1
-  for i in 1, valid_X_kaggle_arr:size(1) do
-    local curr_char = valid_X_kaggle_arr[i]
+  for i = 1, valid_kaggle_X_arr:size(1) do
+    local curr_char = valid_kaggle_X_arr[i]
     -- update sentence spaces
     if curr_char == sentence_char then
       curr_sentence = curr_sentence + 1
@@ -370,16 +380,17 @@ function rnn_model_eval(model, criterion, valid_X_arr, valid_Y_arr, valid_X_kagg
     end
     -- feed curr_char into RNN
     local out = nn.JoinTable(1):forward(model:forward(torch.Tensor({curr_char})))
-    local _, argmax = out:max(2)
+    local _, argmax = out:max(1)
     -- feed any spaces obtained into RNN and update spaces_per_sentence
-    while argmax == 2 do
+    while argmax[1] == 2 do
       out = nn.JoinTable(1):forward(model:forward(torch.Tensor({space_char})))
-      argmax = out:max(2)[2]
+      local _, new_argmax = out:max(1)
+      argmax = new_argmax
       spaces_per_sentence[curr_sentence] = spaces_per_sentence[curr_sentence] + 1
     end
   end
 
-  return perplexity, spaces_per_sentence
+  return spaces_per_sentence
 end
 
 function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim, space_char)
@@ -449,18 +460,18 @@ function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim, space_c
         optim.sgd(func, params, state)
       end
 
-      local valid_X_arr = nn.JoinTable(2):forward(valid_X)
+      --[[local valid_X_arr = nn.JoinTable(2):forward(valid_X)
       valid_X_arr = nn.Reshape(valid_X_arr:size(1)*valid_X_arr:size(2)):forward(valid_X_arr)
       local valid_Y_arr = nn.JoinTable(2):forward(valid_Y)
-      valid_Y_arr = nn.Reshape(valid_Y_arr:size(1)*valid_Y_arr:size(2)):forward(valid_Y_arr)
+      valid_Y_arr = nn.Reshape(valid_Y_arr:size(1)*valid_Y_arr:size(2)):forward(valid_Y_arr)]]
 
-      model:evaluate()
+      --model:evaluate()
 
       -- local loss, correct = rnn_model_eval(model, nn.ClassNLLCriterion(), valid_X_arr, valid_Y_arr, space_char)
-      print('Validation Perplexity:', loss)
-      print('Validation Prediction Accuracy:', correct * 100)
+      --print('Validation Perplexity:', loss)
+      --print('Validation Prediction Accuracy:', correct * 100)
 
-      print('Train perplexity:', torch.exp(total_loss / #X))
+      --print('Train perplexity:', torch.exp(total_loss / #X))
 
       --local loss = eval_nnlm(model, criterion, valid_X, valid_Y)
       --print('Valid perplexity:', torch.exp(loss))
@@ -490,10 +501,10 @@ function main()
    local valid_X_arr = f:read('valid_input'):all():long()
    local valid_Y_arr = f:read('valid_output'):all():long()
    local valid_kaggle_X_arr = f:read('valid_kaggle_input'):all():long()
-   local valid_kaggle_Y_arr = f:read('valid_kaggle_output'):all():long()
    local test_X_arr = f:read('test_input'):all():long()
    vocab_size = f:read('vocab_size'):all():long()[1]
    space_char = f:read('space_char'):all():long()[1]
+   sentence_char = f:read('sentence_char'):all():long()[1]
 
    local backprop_length = opt.backprop_length
    local batch_size = opt.batch_size
@@ -543,7 +554,9 @@ function main()
      local hidden_size = opt.hidden_size
      local max_epochs = opt.max_epochs
 
-     local model = train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, 6, space_char)
+     local model = train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, opt.embed, space_char, sentence_char)
+     print(rnn_model_perplexity(model, valid_X_arr, valid_Y_arr))
+     print(rnn_model_kaggle(model, valid_kaggle_X_arr, space_char, sentence_char))
    end
 
 end

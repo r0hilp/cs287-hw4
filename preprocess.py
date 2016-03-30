@@ -89,7 +89,7 @@ def main(arguments):
         test_input, _ = convert_data(test, char_to_idx)
 
     if valid_kaggle:
-        valid_kaggle_input, valid_kaggle_output = convert_data(valid_kaggle, char_to_idx)
+        valid_kaggle_input, _ = convert_data(valid_kaggle, char_to_idx)
 
     # Save data
     print 'Saving...'
@@ -104,7 +104,6 @@ def main(arguments):
             f['test_input'] = test_input
         if valid_kaggle:
             f['valid_kaggle_input'] = valid_kaggle_input
-            f['valid_kaggle_output'] = valid_kaggle_output
         f['vocab_size'] = np.array([V], dtype=np.int32)
         f['space_char'] = np.array([char_to_idx['<space>']], dtype=np.int32)
         f['sentence_char'] = np.array([char_to_idx['</s>']], dtype=np.int32)
