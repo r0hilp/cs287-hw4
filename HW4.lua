@@ -9,7 +9,7 @@ cmd = torch.CmdLine()
 -- Cmd Args
 cmd:option('-datafile', '', 'data file')
 cmd:option('-classifier', 'lstm', 'classifier to use')
-cmd:option('-model_out_name', 'PTB', 'model output name to use')
+cmd:option('-kaggle_answers', '', 'validation kaggle answers')
 
 cmd:option('-warm_start', '', 'torch file with previous model')
 cmd:option('-model_out_name', 'train', 'output file name of model')
@@ -32,7 +32,7 @@ cmd:option('-max_grad', 5, 'maximum gradient for renormalization')
 cmd:option('-backprop_length', 50, 'backprop length for RNN')
 cmd:option('-batch_size', 32, 'batch size for RNN')
 cmd:option('-hidden_size', 100, 'hidden size for RNN')
-cmd:option('-eval_mode', 'greedy', 'evaluation mode for RNN')
+cmd:option('-space_cutoff', 0.5, 'cutoff probability for a space in RNN greedy search')
 
 function greedy_search(X, CM, model)
   local gram_size = opt.gram_size
@@ -78,9 +78,55 @@ function greedy_search(X, CM, model)
   return spaces
 end
 
-function dp_search(X, CM, model)
+function dp_search(X, CM, model, vocab_size, space_char)
   -- For bigrams only
   assert(opt.gram_size == 2)  
+  -- Multiply size by 2 to account for spaces
+  local pi = torch.LongTensor(2*X:size(1)+1, 2):fill(-1000)
+  local bp = torch.LongTensor(2*X:size(1)+1, 2):fill(0.1)
+
+  pi[1][1] = 0
+  pi[1][2] = 0
+  -- Construct pi
+  for i = 2, 2*X:size(1)+1 do
+    if CM then
+      for context = 1, vocab_size do
+        local h = hash(context)
+        local y_hat = {0,0}
+        if CM[h] then
+          if CM[h][1] == nil then
+            y_hat[1] = 0
+            y_hat[2] = 1
+          elseif CM[h][2] == nil then
+            y_hat[1] = 1
+            y_hat[2] = 0
+          else
+            y_hat = {CM[h][1]/(CM[h][1] + CM[h][2]), CM[h][2]/(CM[h][1] + CM[h][2])}
+          end
+        end
+        for c = 1, 2 do
+          local score = pi[i-1][c] + math.log(y_hat[c])
+          if score > pi[i][c] then
+            pi[i][c] = score
+            bp[i][c] = context
+          end
+        end
+      end
+    end
+  end
+
+  -- Run through backpointers
+  if CM then
+    best_path = {}
+    local idx = X:size(1)
+    while idx > 0 do
+      local c = 1
+      if X[idx] == space_char then
+        c = 2
+      end
+    end
+    return best_path
+  end
   --local pi = torch.LongTensor(2, X:size(1)):fill(-1000)
   --local bp = torch.zeros(1, X:size(1)):long()
 
@@ -391,7 +437,7 @@ function rnn_model_eval(model, criterion, X, Y)
   return total_loss / N, total_correct / N
 end
 
-function rnn_model_kaggle(model, valid_kaggle_X_arr, space_char, sentence_char)
+function rnn_model_kaggle(model, kaggle_X_arr, space_char, sentence_char)
 
   model:evaluate()
 
@@ -399,8 +445,8 @@ function rnn_model_kaggle(model, valid_kaggle_X_arr, space_char, sentence_char)
   local spaces_per_sentence = {}
   spaces_per_sentence[1] = 0
   local curr_sentence = 1
-  for i = 1, valid_kaggle_X_arr:size(1) do
-    local curr_char = valid_kaggle_X_arr[i]
+  for i = 1, kaggle_X_arr:size(1)-1 do
+    local curr_char = kaggle_X_arr[i]
     -- update sentence spaces
     if curr_char == sentence_char then
       curr_sentence = curr_sentence + 1
@@ -408,11 +454,12 @@ function rnn_model_kaggle(model, valid_kaggle_X_arr, space_char, sentence_char)
     end
     -- feed curr_char into RNN
     local out = nn.JoinTable(1):forward(model:forward(torch.Tensor({curr_char})))
-    local _, argmax = out:max(1)
+    local max, argmax = out:max(1)
     -- feed any spaces obtained into RNN and update spaces_per_sentence
-    while argmax[1] == 2 do
+    while argmax[1] == 2 and math.exp(max) >= opt.space_cutoff do
       out = nn.JoinTable(1):forward(model:forward(torch.Tensor({space_char})))
-      local _, new_argmax = out:max(1)
+      local new_max, new_argmax = out:max(1)
+      max = new_max
       argmax = new_argmax
       spaces_per_sentence[curr_sentence] = spaces_per_sentence[curr_sentence] + 1
     end
@@ -583,8 +630,36 @@ function main()
      local max_epochs = opt.max_epochs
 
      local model = train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, opt.embed, space_char, sentence_char)
-     --print(rnn_model_perplexity(model, valid_X_arr, valid_Y_arr))
-     --print(rnn_model_kaggle(model, valid_kaggle_X_arr, space_char, sentence_char))
+
+     -- read kaggle answers into a table (put into rnn_model_kaggle?)
+     local valid_kaggle_answers = {}
+     if opt.kaggle_answers ~= '' then
+       local f = io.open(opt.kaggle_answers)
+       -- skip header
+       f:read("*l")
+       local count = 1
+       local line = f:read("*l")
+       while line ~= nil do
+         valid_kaggle_answers[count] = tonumber(line:split(",")[2])
+         line = f:read("*l")
+         count = count + 1
+       end
+       local spaces_per_sentence = rnn_model_kaggle(model, valid_kaggle_X_arr, space_char, sentence_char)
+       local mse = 0
+       for i, j in pairs(valid_kaggle_answers) do
+         mse = mse + (j - spaces_per_sentence[i]) * (j - spaces_per_sentence[i])
+       end
+       mse = mse / #spaces_per_sentence
+       print('Valid MSE:', mse)
+     end
+
+     -- Test
+     local test_spaces_per_sentence = rnn_model_kaggle(model, test_X_arr, space_char, sentence_char)
+     local f = io.open(opt.model_out_name .. '.preds', 'w')
+     f:write('ID,Count\n')     
+     for i, j in pairs(test_spaces_per_sentence) do
+       f:write(i..','..j..'\n')
+     end
    end
 
 end
