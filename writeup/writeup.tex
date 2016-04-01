@@ -21,17 +21,32 @@ Assume our training corpus consists of a sequence of characters $c_1, c_2, \dots
 
 Our training data represents this corpus as a set of pairs $(c_i, y_i)$ for $i \in \{1, \dots, N\}$. The output variable $y_i$ is set to be equal to $1$ if the next character $c_{i+1}$ is not a space, and $2$ if it is a space. By default, we set $y_N = 1$ since $c_N$ is clearly not followed by a space. 
 
-Given a sequence $\mathbf{c}'$ of characters $c'_1c'_2\dots c'_M$, we can define the function $f$ to be the % not sure how 
+Calculating a word segmentation is equivalent to taking an input sequence of characters $\mathbf{c}' = c_1c_2\dots c_M$ of characters as input and outputting a sequence $y_1y_2\dots y_M$, where $y_i = 2$ if we insert a space after $c_i$ and $1$ if not. 
 
-Our goal is to train a model that will take an input character $c$ and output the probability that the next character is a space. Then, we can construct a model-specific evaluation algorithm 
+We determine the \emph{best} word segmentation by finding the sequence $y_1y_2\dots y_M$ that maximizes the joint probability function $f(c_1, \dots, c_M, y_1, \dots, y_M) = p(c_1, \dots, c_M, y_1, \dots, y_M)$. 
+
+For the approaches we are considering, this requires us to train a model that will take an input character $c$ and output the probability that the next character is a space. Then, we apply an evaluation algorithm at test time to generate the best sequence. 
 
 \subsection{Evaluation}
 
+We evaluate our models on two validation sets. These validation sets contain the same characters, but one already contains spaces while the other does not. 
 
+First, note that our model is essentially a language model, taking in a character and outputting a simple distribution on the next character. Therefore, we can calculate perplexity over the validation set with spaces. This is equal to the exponential of the average negative log likelihood. Since we only have two classes, the perplexity is at most $2$. 
+
+For our second validation set, we can run our model and evaluation algorithm to get a word segmentation over the entire set. Here, we keep track of the number of spaces inserted into each sentence and compute the mean squared error of these numbers with respect to the provided answers for each sentence. 
 
 \section{Model and Algorithms}
 
-\subsection{Hidden Markov Models}
+\subsection{Markovian Models}
+
+The key to these models is the Markov assumption, which states that $p(y_i | y_1, \dots, y_{i-1}) = p(y_i | y_{i-k+1}, \dots, y_{i-1})$ for some fixed $k$. This allows us to get a simple expression for the joint probability that we can calculate using either a count-based model or a neural network model. 
+
+We can expand out the joint probability as 
+\begin{align*}
+  p(c_1, \dots, c_M, y_1, \dots, y_M) &= p(c_1, \dots, c_M | y_1, \dots, y_M)p(y_1, \dots, y_M) \\
+  &= \prod_{i=1}^M p(c_i | c_1, \dots, c_{i-1}, y_1, \dots, y_M)p(y_i | y_1, \dots, y_{i-1}) \\ 
+  &= \prod_{i=1}^M p(c_i | c_1, \dots, c_{i-1}, y_1, \dots, y_M)p(y_i | y_{i-k+1}, \dots, y_{i-1}) \\
+\end{align*}
 
 \subsubsection{Count Model}
 
@@ -42,6 +57,9 @@ Our goal is to train a model that will take an input character $c$ and output th
 \subsubsection{Long Short Term Memory Network}
 
 \subsubsection{Gated Recurrent Unit Network}
+
+\subsection{Evaluation Algorithms}
+
 
 \section{Experiments}
 
