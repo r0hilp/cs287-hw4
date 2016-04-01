@@ -129,19 +129,120 @@ and combine them to produce the new hidden state
 Then, we multiply $\mathbf{s}_i$ by $W_1$ to produce an output vector $\mathbf{z}_i$ of size $2$. Finally, we force a probability distribution by taking the softmax to get the desired output $\hat{y}_i = \text{softmax}(\mathbf{z}_i)$. 
 \subsection{Evaluation Algorithms}
 
-We have three different algorithms that we use to take a model and use it to predict a sequence $y_1\dots y_M$ for an input sequence $c'_1\dots c'_M$. The first two are a greedy algorithm and a dynamic programming algorithm for our Markovian models. The last one is a greedy algorithm for our RNN models. 
+We have three different algorithms that we use to take a model and use it to predict a sequence $y_1\dots y_M$ for an input sequence $c'_1\dots c'_M$. The first two are a greedy algorithm and a dynamic programming algorithm for our Markovian models. The last one is a greedy algorithm for our RNN models. In all of them, we will denote our model by a function $f$ from the input space to the space/non-space probability distribution. 
 
 \subsubsection{Markovian Greedy}
 
-By our Markov assumption, we have the joint probability $p(y_1, \dots, y_M, c'_1, \dots, c'_M)$ is equal to $\prod_{i=1}^M p(y_i | c_i, \dots, c_{i-k+1})$ for some fixed context size $k$. 
+The algorithm is given formally. It simply consists of greedily predicting each $y_i$ and recording how many $y_i = 2$ per sentence. 
+
+\begin{algorithmic}
+  \Procedure{MarkovGreedy}{$c'_1, \dots, c'_M$, $f$}
+    \State{$sn \leftarrow 1$}
+    \Comment{Set sentence number to $1$}
+    \State{$S = \{\}$}
+    \Comment{Initialize empty dictionary}
+    \For{$i \in 1, \dots, M$}
+      \If{$c'_i = </s>$}
+        \State{$sn \leftarrow sn + 1$}
+        \State{$S[sn] \leftarrow 0$}
+        \Comment{Increment sentence number at end of sentence}
+      \EndIf{}
+      \State{$y \leftarrow f(c'_i)_2$}
+      \Comment{Feed $c'_i$ into the model}
+      \If{$y \geq 1/2$}
+        $S[sn] \leftarrow S[sn] + 1$
+      \EndIf{}
+    \EndFor{}
+    \Return{$S$}
+  \EndProcedure{}
+\end{algorithmic}
 
 \subsubsection{Markovian Dynamic Programming}
 
 \subsubsection{RNN Greedy}
 
+The algorithm is given formally below. In plain language, we simply feed in each character one at a time to our RNN. If the RNN predicts a space, we record that in our output dictionary and feed the space in and then continue to the next character. 
+
+\begin{algorithmic}
+  \Procedure{RNNGreedy}{$c'_1, \dots, c'_M$, $f$, $\mu$, $<sp>$, $</s>$}
+    \State{$i \leftarrow 1$}
+    \State{$sn \leftarrow 1$}
+    \Comment{Set sentence number to $1$}
+    \State{$S = \{\}$}
+    \Comment{Initialize empty dictionary}
+    \State{$S[sn] = 0$}
+    \While{$i \leq M$}
+      \If{$c'_i = </s>$}
+        \State{$sn \leftarrow sn + 1$}
+        \State{$S[sn] \leftarrow 0$}
+        \Comment{Increment sentence number at end of sentence}
+      \EndIf{}
+      \State{$y \leftarrow f(c'_i)_2$}
+      \Comment{Feed $c'_i$ into the model}
+      \If{$y \geq \mu$}
+        \State{$y \leftarrow f(<sp>)$}
+        \State{$S[sn] = S[sn] + 1$}
+        \Comment{Feed a space into the model}
+      \EndIf{}
+      \State{$i \leftarrow i+1$}
+    \EndWhile{}
+  \Return{$S$}
+  \EndProcedure{}
+\end{algorithmic}
+
 \section{Experiments}
 
+The table below documents the training set perplexity, validation set perplexity, and training time for each of our models. The training time for the NNLM and RNN models are given per epoch. 
+
+\begin{center}
+  \begin{tabular}{| c | c | c | c |}
+    \hline Model & Train Perplexity & Valid Perplexity & Training Time \\
+    \hline Count & & & \\
+    NNLM & & & \\
+    LSTM & & & \\
+    GRU & & & \\
+    \hline
+  \end{tabular}
+\end{center}
+
+For the NNLM and RNN models, we also plot the train/valid perplexities per epoch to verify that our models are training properly. 
+
+We also recorded the MSE of the spaces per sentence predictions of our models with each evaluation algorithm. 
+
+\begin{center}
+  \begin{tabular}{| c | c | c |}
+    \hline Model & Algorithm & MSE \\
+    \hline Count & Greedy & \\
+    & DP & \\
+    NNLM & Greedy & \\
+    & DP & \\
+    LSTM & Greedy & \\
+    GRU & Greedy & \\
+    \hline
+  \end{tabular}
+\end{center}
+
+The MSE for RNN greedy is that for $\mu = 0.3$, which was optimized by grid search on an LSTM trained for $20$ epochs. The results are given in the table below. 
+
+\begin{center}
+\begin{tabular}{| c | c |}
+  \hline $\mu$ & MSE \\
+  \hline $0.1$ & 19.1\\
+  $0.2$ & 7.7\\
+  $0.3$ & 5.4\\
+  $0.4$ & 6.3\\
+  $0.5$ & 10.9\\
+  $0.6$ & 18.6\\
+  $0.7$ & 33.6\\
+  $0.8$ & 59.8\\
+  $0.9$ & 144.4\\
+  \hline
+\end{tabular}
+\end{center}
+
 \section{Conclusion}
+
+
 
 \bibliographystyle{apalike}
 \bibliography{writeup}
