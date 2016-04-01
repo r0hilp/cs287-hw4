@@ -32,7 +32,7 @@ cmd:option('-max_grad', 5, 'maximum gradient for renormalization')
 cmd:option('-backprop_length', 50, 'backprop length for RNN')
 cmd:option('-batch_size', 32, 'batch size for RNN')
 cmd:option('-hidden_size', 100, 'hidden size for RNN')
-cmd:option('-space_cutoff', 0.5, 'cutoff probability for a space in RNN greedy search')
+cmd:option('-space_cutoff', 0.6, 'cutoff probability for a space in RNN greedy search')
 
 function greedy_search(X, CM, model)
   local gram_size = opt.gram_size
@@ -81,37 +81,30 @@ end
 function dp_search(X, CM, model, vocab_size, space_char)
   -- For bigrams only
   assert(opt.gram_size == 2)  
-  -- Multiply size by 2 to account for spaces
-  local pi = torch.LongTensor(2*X:size(1)+1, 2):fill(-1000)
-  local bp = torch.LongTensor(2*X:size(1)+1, 2):fill(0.1)
+  -- pi[i][c] = maximum probability of a sequence s_1...s_i with s_i = c
+  local pi = torch.LongTensor(X:size(1), 2):fill(-1000)
+  local bp = torch.LongTensor(X:size(1), 2):fill(0.1)
+  
+  -- store distribution over space_char
+  local space_log_probs = CM[hash(torch.LongTensor{space_char})]
+  space_log_probs[1] = math.log(space_log_probs[1])
+  space_log_probs[2] = math.log(space_log_probs[2])
 
-  pi[1][1] = 0
-  pi[1][2] = 0
-  -- Construct pi
-  for i = 2, 2*X:size(1)+1 do
+  -- calculate base case
+  local c_1 = hash(torch.LongTensor{X[1]})
+  pi[1][1] = math.log(CM[c_1][1]/(CM[c_1][1]+CM[c_1][2]))
+  pi[1][2] = math.log(CM[c_1][2]/(CM[c_1][1]+CM[c_1][2])) + space_log_probs[1]
+
+  -- induct
+  for i = 2, X:size(1) do
     if CM then
-      for context = 1, vocab_size do
-        local h = hash(context)
-        local y_hat = {0,0}
-        if CM[h] then
-          if CM[h][1] == nil then
-            y_hat[1] = 0
-            y_hat[2] = 1
-          elseif CM[h][2] == nil then
-            y_hat[1] = 1
-            y_hat[2] = 0
-          else
-            y_hat = {CM[h][1]/(CM[h][1] + CM[h][2]), CM[h][2]/(CM[h][1] + CM[h][2])}
-          end
-        end
-        for c = 1, 2 do
-          local score = pi[i-1][c] + math.log(y_hat[c])
-          if score > pi[i][c] then
-            pi[i][c] = score
-            bp[i][c] = context
-          end
-        end
-      end
+      local context = X[i]
+      local h = hash(context)
+      local max, argmax = pi[i-1]:max(1)
+      pi[i][1] = max + math.log(CM[h][1]/CM[h][1]+CM[h][2])
+      bp[i][1] = argmax
+      pi[i][2] = max + math.log(CM[h][2]/CM[h][1]+CM[h][2]) + space_log_probs[1]
+      bp[i][2] = argmax
     end
   end
 
@@ -388,6 +381,44 @@ function rnn_reshape(arr, backprop_length, batch_size)
   return ret
 end
 
+function RNN_model(hidden_size, vocab_size, embed_dim)
+  if opt.warm_start ~= '' then
+    return torch.load(opt.warm_start).model
+  end
+
+  local model = nn.Sequential()
+  return model
+end
+
+function GRU_model(hidden_size, vocab_size, embed_dim, dropout)
+   dropout = dropout or 0
+
+   if opt.warm_start ~= '' then
+     return torch.load(opt.warm_start).model
+   end
+
+   local model = nn.Sequential()
+   model:add(nn.LookupTable(vocab_size, embed_dim))
+   model:add(nn.SplitTable(1, 3))
+
+   local stepmodule = nn.Sequential()
+
+   local rnn = nn.Sequential()
+   rnn:add(nn.GRU(embed_dim, hidden_size, nil, dropout))
+   stepmodule:add(rnn)
+
+   local output = nn.Sequential()
+   output:add(nn.Linear(hidden_size, 2))
+   output:add(nn.LogSoftMax())
+   stepmodule:add(output)
+
+   model:add(nn.Sequencer(stepmodule))
+   model:remember('both')
+
+   return model
+end
+
+
 function LSTM_model(hidden_size, vocab_size, embed_dim)
    if opt.warm_start ~= '' then
      return torch.load(opt.warm_start).model
@@ -437,7 +468,7 @@ function rnn_model_eval(model, criterion, X, Y)
   return total_loss / N, total_correct / N
 end
 
-function rnn_model_kaggle(model, kaggle_X_arr, space_char, sentence_char)
+function rnn_model_kaggle(model, kaggle_X_arr, space_char, sentence_char, space_cutoff)
 
   model:evaluate()
 
@@ -454,13 +485,13 @@ function rnn_model_kaggle(model, kaggle_X_arr, space_char, sentence_char)
     end
     -- feed curr_char into RNN
     local out = nn.JoinTable(1):forward(model:forward(torch.Tensor({curr_char})))
-    local max, argmax = out:max(1)
+    -- local max, argmax = out:max(1)
     -- feed any spaces obtained into RNN and update spaces_per_sentence
-    while argmax[1] == 2 and math.exp(max) >= opt.space_cutoff do
+    while math.exp(out[2]) >= space_cutoff do
       out = nn.JoinTable(1):forward(model:forward(torch.Tensor({space_char})))
-      local new_max, new_argmax = out:max(1)
-      max = new_max
-      argmax = new_argmax
+      -- local new_max, new_argmax = out:max(1)
+      -- max = new_max
+      -- argmax = new_argmax
       spaces_per_sentence[curr_sentence] = spaces_per_sentence[curr_sentence] + 1
     end
   end
@@ -468,14 +499,19 @@ function rnn_model_kaggle(model, kaggle_X_arr, space_char, sentence_char)
   return spaces_per_sentence
 end
 
-function train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim, space_char)
+function train_RNN_model(X, Y, valid_X, valid_Y, vocab_size, embed_dim, space_char)
    local eta = opt.eta
    local max_epochs = opt.max_epochs
    local backprop_length = opt.backprop_length
    local hidden_size = opt.hidden_size
    local N = (#X - 1) * backprop_length * opt.batch_size + X[#X]:size(1) * opt.batch_size
 
-   local model = LSTM_model(hidden_size, vocab_size, embed_dim)
+   local model
+   if opt.classifier == 'lstm' then
+     model = LSTM_model(hidden_size, vocab_size, embed_dim)
+   elseif opt.classifier == 'gru' then
+     model = GRU_model(hidden_size, vocab_size, embed_dim) 
+   end
    local criterion = nn.SequencerCriterion(nn.ClassNLLCriterion())
 
    -- call once
@@ -619,7 +655,7 @@ function main()
 
      local model, _ = train_nnlm(X, Y, valid_X, valid_Y)
 
-   elseif opt.classifier == 'lstm' then
+   elseif opt.classifier == 'lstm' or opt.classifier == 'gru' then
      local X = rnn_reshape(X_arr, backprop_length, batch_size)
      local Y = rnn_reshape(Y_arr, backprop_length, batch_size)
      local valid_X = rnn_reshape(valid_X_arr, backprop_length, batch_size)
@@ -629,7 +665,7 @@ function main()
      local hidden_size = opt.hidden_size
      local max_epochs = opt.max_epochs
 
-     local model = train_LSTM_model(X, Y, valid_X, valid_Y, vocab_size, opt.embed, space_char, sentence_char)
+     local model = train_RNN_model(X, Y, valid_X, valid_Y, vocab_size, opt.embed, space_char, sentence_char)
 
      -- read kaggle answers into a table (put into rnn_model_kaggle?)
      local valid_kaggle_answers = {}
@@ -644,7 +680,7 @@ function main()
          line = f:read("*l")
          count = count + 1
        end
-       local spaces_per_sentence = rnn_model_kaggle(model, valid_kaggle_X_arr, space_char, sentence_char)
+       local spaces_per_sentence = rnn_model_kaggle(model, valid_kaggle_X_arr, space_char, sentence_char, opt.space_cutoff)
        local mse = 0
        for i, j in pairs(valid_kaggle_answers) do
          mse = mse + (j - spaces_per_sentence[i]) * (j - spaces_per_sentence[i])
@@ -654,7 +690,7 @@ function main()
      end
 
      -- Test
-     local test_spaces_per_sentence = rnn_model_kaggle(model, test_X_arr, space_char, sentence_char)
+     local test_spaces_per_sentence = rnn_model_kaggle(model, test_X_arr, space_char, sentence_char, opt.space_cutoff)
      local f = io.open(opt.model_out_name .. '.preds', 'w')
      f:write('ID,Count\n')     
      for i, j in pairs(test_spaces_per_sentence) do
