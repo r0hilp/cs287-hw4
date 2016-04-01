@@ -12,12 +12,14 @@ cmd:option('-classifier', 'lstm', 'classifier to use')
 cmd:option('-kaggle_answers', '', 'validation kaggle answers')
 
 cmd:option('-warm_start', '', 'torch file with previous model')
+cmd:option('-action', 'train', 'action: train or test')
 cmd:option('-model_out_name', 'train', 'output file name of model')
 cmd:option('-debug', 0, 'print training debug')
 
 -- Hyperparameters
 cmd:option('-alpha', 0.1, 'smoothing alpha')
-cmd:option('-gram_size', 2, 'size of context')
+cmd:option('-gram_size', 5, 'size of context')
+cmd:option('-test_method', 'greedy', 'greedy or dp')
 
 cmd:option('-eta', 0.01, 'learning rate for SGD')
 cmd:option('-min_epochs', 5, 'min epochs for NN training')
@@ -78,75 +80,98 @@ function greedy_search(X, CM, model)
   return spaces
 end
 
-function dp_search(X, CM, model, vocab_size, space_char)
-  -- For bigrams only
-  assert(opt.gram_size == 2)  
-  -- Multiply size by 2 to account for spaces
-  local pi = torch.LongTensor(2*X:size(1)+1, 2):fill(-1000)
-  local bp = torch.LongTensor(2*X:size(1)+1, 2):fill(0.1)
+function dp_search(X, CM, model)
+  local gram_size = opt.gram_size
 
-  pi[1][1] = 0
-  pi[1][2] = 0
-  -- Construct pi
-  for i = 2, 2*X:size(1)+1 do
-    if CM then
-      for context = 1, vocab_size do
-        local h = hash(context)
-        local y_hat = {0,0}
-        if CM[h] then
-          if CM[h][1] == nil then
-            y_hat[1] = 0
-            y_hat[2] = 1
-          elseif CM[h][2] == nil then
-            y_hat[1] = 1
-            y_hat[2] = 0
+  -- n gram dp, bitmask for spaces after w_{i-n+2},...,w_{i-1}
+  -- to get p(space | w_i, ..., w_{i-n+2})
+  local pi = torch.Tensor(X:size(1), 2 ^ (gram_size - 2)):fill(-math.huge)
+  local bp = torch.zeros(X:size(1), 2 ^ (gram_size - 2)):long()
+  local cache = {}
+
+  -- initialize
+  pi[gram_size-2]:zero()
+
+  print(X:size())
+  for i = gram_size-1, X:size(1) do
+    if i % 10000 == 0 then print(i) end
+    for k = 0, 2 ^ (gram_size - 2) - 1 do
+      for c = 1, 2 do
+        local prev_k = math.floor(k/2) + (c-1) * (2 ^ (gram_size - 3))
+        local chars = X:narrow(1, i-gram_size+2, gram_size - 1)
+        local context = {}
+        for j = 1, gram_size - 2 do
+          table.insert(context, chars[j])
+          if bit.band(prev_k, 2 ^ (gram_size-2-j)) > 0 then
+            table.insert(context, space_char)
+          end
+        end
+        table.insert(context, chars[gram_size-1])
+        context = torch.LongTensor(context)
+        context = context:narrow(1, context:size(1) - gram_size + 2, gram_size - 1)
+
+        local z
+        if CM then
+          local h = hash(context)
+          if cache[h] then
+            --print('cached', h)
+            z = cache[h]
           else
-            y_hat = {CM[h][1]/(CM[h][1] + CM[h][2]), CM[h][2]/(CM[h][1] + CM[h][2])}
+            z = torch.Tensor{0.6, 0.4}
+            if CM[h] then
+              if CM[h][1] then
+                z[1] = CM[h][1]
+              else
+                z[1] = 0
+              end
+              if CM[h][2] then
+                z[2] = CM[h][2]
+              else
+                z[2] = 0
+              end
+            end
+            z:div(z:sum())
+            z:log()
+            cache[h] = z:clone()
+          end
+        elseif model then
+          local h = hash(context)
+          if cache[h] then
+            z = cache[h]
+          else
+            z = model:forward(context)
+            cache[h] = z:clone()
           end
         end
-        for c = 1, 2 do
-          local score = pi[i-1][c] + math.log(y_hat[c])
-          if score > pi[i][c] then
-            pi[i][c] = score
-            bp[i][c] = context
-          end
+
+        --print('i,k,c:')
+        --print(i, k, c)
+        --print(context, z)
+        --io.read()
+
+        local cur = (k%2) + 1
+        if pi[i-1][prev_k + 1] + z[cur] > pi[i][k + 1] then
+          pi[i][k+1] = pi[i-1][prev_k + 1] + z[cur]
+          bp[i][k+1] = prev_k -- annoying indices
         end
       end
     end
   end
 
-  -- Run through backpointers
-  if CM then
-    best_path = {}
-    local idx = X:size(1)
-    while idx > 0 do
-      local c = 1
-      if X[idx] == space_char then
-        c = 2
-      end
+  print(pi)
+
+  local spaces = {}
+  local _, p = torch.max(pi[X:size(1)], 1)
+  p = p[1] - 1
+
+  for i = X:size(1), gram_size - 2, -1 do
+    if p%2 > 0 then
+      table.insert(spaces, i)
     end
-    return best_path
+    p = bp[i][p + 1]
+    --io.write(p, " ")
   end
-  --local pi = torch.LongTensor(2, X:size(1)):fill(-1000)
-  --local bp = torch.zeros(1, X:size(1)):long()
-
-  --pi[1][1] = 0
-  --pi[1][2] = 0
-  --for i = 2, X:size(1) do
-    --local context = torch.LongTensor{X[i]}
-
-    ---- Evaluate
-    --if CM then
-      --local h = hash(context)
-      --for c = 1, 2 do
-        --score = pi[i-1][c]
-
-    --elseif model then
-    --end
-  --end
-
-  --local spaces = {}
-  --return spaces
+  return spaces
 end
 
 function X_to_context(X, gram_size)
@@ -604,7 +629,16 @@ function main()
      print('Valid perplexity:', torch.exp(valid_nll))
 
      -- Test
-     local spaces = greedy_search(test_X_arr, CM, nil)
+     local spaces
+     if opt.test_method == 'greedy' then
+       spaces = greedy_search(test_X_arr, CM, nil) 
+     elseif opt.test_method == 'dp' then
+       print('hi')
+       spaces = dp_search(test_X_arr, CM, nil)
+       --spaces = dp_search(valid_kaggle_X_arr, CM, nil)
+       print(spaces)
+     end
+
      -- Write space locations
      local space_f = io.open('test_spaces_count.txt', 'w')
      for i,v in ipairs(spaces) do
@@ -617,7 +651,30 @@ function main()
      local Y = Y_arr:narrow(1, gram_size-1, Y_arr:size(1) - gram_size + 2)
      local valid_Y = valid_Y_arr:narrow(1, gram_size-1, valid_Y_arr:size(1) - gram_size + 2)
 
-     local model, _ = train_nnlm(X, Y, valid_X, valid_Y)
+     local model
+     if opt.action == 'train' then
+       model, _ = train_nnlm(X, Y, valid_X, valid_Y)
+     elseif opt.action == 'test' then
+       model = torch.load(opt.warm_start).model
+     end
+
+     print(test_X_arr:narrow(1, 1, 10))
+
+     -- Test
+     local spaces
+     if opt.test_method == 'greedy' then
+       spaces = greedy_search(test_X_arr, nil, model) 
+     elseif opt.test_method == 'dp' then
+       spaces = dp_search(test_X_arr, nil, model)
+       --spaces = dp_search(valid_kaggle_X_arr, nil, model)
+       print(spaces)
+     end
+
+     -- Write space locations
+     local space_f = io.open('test_spaces_count_nnlm.txt', 'w')
+     for i,v in ipairs(spaces) do
+       space_f:write(v .. "\n")
+     end
 
    elseif opt.classifier == 'lstm' then
      local X = rnn_reshape(X_arr, backprop_length, batch_size)
