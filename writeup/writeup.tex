@@ -52,14 +52,92 @@ We can expand out the joint probability as
 
 \subsubsection{Neural Network Linear Model}
 
+We use Bengio's neural network model like last assignment. It aim to directly learn a function from the context $c_{i-k+1}c_{i-k+2}\dots c_i$ to $y_i$. We have parameters
+\begin{itemize}
+  \item $W_0 \in \mathbb{R}^{|\mathcal{V}| \times d_{in}|}$, a lookup table of character embeddings
+  \item $W_1 \in \mathbb{R}^{kd_{in} \times d_{hid}}$, $b_1 \in \mathbb{R}^{d_{hid}}$,
+  \item $W_2 \in \mathbb{R}^{d_{hid} \times |\mcV|}$, $b_2 \in \mathbb{R}^{2}$
+\end{itemize}
+
+First, the character context is transformed into character embeddings by multiplying with $W_0$, and then concatenated to get a vector $\mathbf{x}_0$ of size $k \cdot d_{in}$. Then, we get a size $2$ vector of scores
+$$\mathbf{z} = \text{tanh}(\mathbf{x}_0W_1 + b_1)W_2 + b_2 \in \mathbb{R}^2$$
+
+Finally, we can force a probability distribution by taking the softmax $\hat{y} = \text{softmax}(\mathbf{z})$. Then, we have the probability that the next word is a space is $P(y_i = 2) = \hat{y}_2$, while the probability that it is not a space is $P(y_i = 1) = \hat{y}_1$. 
+
 \subsection{Recurrent Neural Networks}
+
+Our recurrent neural networks have the following parameters:
+\begin{itemize}
+  \item $W_0 \in \mathbb{R}^{|\mathcal{V}| \times d_{in}}$,
+  \item $\mathbf{s}_0 \in \mathbb{R}^{d_{hid}}$, the initial hidden state,
+  \item $R: \mathbb{R}^{d_{hid}} \times \mathbb{R}^{d_{in}} \to \mathbb{R}^{d_{hid}}$, a parameterized state transition function,
+  \item $W_1: \mathcal{R}^{d_{hid}} \to \mathbb{R}^2$, $b_1 \in \mathbb{R}^{2}$
+\end{itemize}
+
+The exact definition of $R$ depends on the type of RNN we are using. All of our RNNS are\textbf{transducer} RNNs, meaning that they consume an input sequence $c_1, \dots, c_M$ of characters and output a sequence $\hat{y}_1, \dots, \hat{y}_M$, where $\hat{y}_i = p(y_i | c_i, c_{i-1}, \dots, c_1)$. 
 
 \subsubsection{Long Short Term Memory Network}
 
+We use the LSTM model of Hochreiter and Schmidhuber, illustrated below:
+
+\begin{center}
+  \includegraphics[width=0.5\textwidth]{LSTM3-chain.png}
+\end{center}
+
+Formally, this requires the introduction of some new parameters
+\begin{itemize}
+  \item $W^{xi} \in \mathbb{R}^{d_{in} \times d_{hid}}$, $W^{si} \in \mathbb{R}^{d_{hid} \times d_{hid}}$, $b^i \in \mathbb{R}^{d_{hid}}$, 
+  \item $W^{xi} \in \mathbb{R}^{d_{in} \times d_{hid}}$, $W^{sj} \in \mathbb{R}^{d_{hid} \times d_{hid}}$, $b^j \in \mathbb{R}^{d_{hid}}$,
+  \item $W^{xi} \in \mathbb{R}^{d_{in} \times d_{hid}}$, $W^{sf} \in \mathbb{R}^{d_{hid} \times d_{hid}}$, $b^f \in \mathbb{R}^{d_{hid}}$,
+  \item $W^{xi} \in \mathbb{R}^{d_{in} \times d_{hid}}$, $W^{so} \in \mathbb{R}^{d_{hid} \times d_{hid}}$, $b^o \in \mathbb{R}^{d_{hid}}$,
+  \item $\mathbf{C}_0 \in \mathbb{R}^{d_{hid}}$, the initial cell state
+\end{itemize}
+
+Let $c_i$ be our input character, and let $\mathbf{C}_{i-1}$ and $\mathbf{s}_{i-1}$ be the previously calculated cell and hidden states, respectively. First, we transform $c_i$ into a vector $\mathbf{x}_i$ of size $d_{in}$ by multiplying it by $W_0$. Then, we calculate the four following vectors
+\begin{align*}
+  \mathbf{i} &= \text{tanh}(\mathbf{x}_iW^{xi} + \mathbf{s}_{i-1}W^{si} + b^i \\
+  \mathbf{j} &= \sigma(\mathbf{x}_iW^{xj} + \mathbf{s}_{i-1}W^{sj} + b^j \\
+  \mathbf{i} &= \sigma(\mathbf{x}_iW^{xf} + \mathbf{s}_{i-1}W^{sf} + b^f \\
+  \mathbf{i} &= \text{tanh}(\mathbf{x}_iW^{xo} + \mathbf{s}_{i-1}W^{so} + b^o \\
+\end{align*}
+and combine them to produce the new cell state and hidden state
+\begin{align*}
+  \mathbf{C}_i &= \mathbf{j} \odot \mathbf{i} + \mathbf{f} \odot \mathbf{C}_{i-1} \\
+  \mathbf{s}_i &= R(\mathbf{s}_{i-1}, \mathbf{x}_i) = \text{tanh}(\mathbf{C}_i) \odot \mathbf{o}
+\end{align*}
+Then, we multiply $\mathbf{s}_i$ by $W_1$ to produce an output vector $\mathbf{z}_i$ of size $2$. Finally, we force a probability distribution by taking the softmax to get the desired output $\hat{y}_i = \text{softmax}(\mathbf{z}_i)$. 
+
 \subsubsection{Gated Recurrent Unit Network}
 
+We use the GRU model of Cho et al. This model requires the following parameters in addition to the generic RNN parameters
+\begin{itemize}
+  \item $W^{xt} \in \mathbb{R}^{d_{in} \times d_{hid}}$, $W^{st} \in \mathbb{R}^{d_{hid} \times d_{hid}}$, $b^t \in \mathbb{R}^{d_{hid}}$, 
+  \item $W^{xr} \in \mathbb{R}^{d_{in} \times d_{hid}}$, $W^{sr} \in \mathbb{R}^{d_{hid} \times d_{hid}}$, $b^r \in \mathbb{R}^{d_{hid}}$, 
+  \item $W^x \in \mathbb{R}^{d_{in} \times d_{hid}}$, $W^s \in \mathbb{R}^{d_{hid} \times d_{hid}}$, $b \in \mathbb{R}^{d_{hid}}$
+\end{itemize}
+
+Let $c_i$ be our input character, and let $\mathbf{s}_{i-1}$ be the previously calculated hidden state. First, we transform $c_i$ into a vector $\mathbf{x}_i$ of size $d_{in}$ by multiplying it by $W_0$. Then, we calculate the following three vectors
+\begin{align*}
+  \widetilde{\mathbf{h}} &= \text{tanh}(\mathbf{x}_iW^{x} + (\mathbf{r} \odot \mathbf{s}_{i-1})W^s + b) \\
+  \mathbf{r} &= \sigma(\mathbf{x}_iW^{xr} + \mathbf{s}_{i-1}W^{sr} + b^r) \\
+  \mathbf{t} &= \sigma(\mathbf{x}_iW^{xt} + \mathbf{s}_{i-1}W^{st} + b^t)
+\end{align*}
+and combine them to produce the new hidden state
+\begin{align*}
+  \mathbf{s}_i &= R(\mathbf{s}_{i-1}, \mathbf{x}_i) = (1 - \mathbf{t}) \odot \widetilde{\mathbf{h}} + \mathbf{t} \odot \mathbf{s}_{i-1}
+\end{align*}
+Then, we multiply $\mathbf{s}_i$ by $W_1$ to produce an output vector $\mathbf{z}_i$ of size $2$. Finally, we force a probability distribution by taking the softmax to get the desired output $\hat{y}_i = \text{softmax}(\mathbf{z}_i)$. 
 \subsection{Evaluation Algorithms}
 
+We have three different algorithms that we use to take a model and use it to predict a sequence $y_1\dots y_M$ for an input sequence $c'_1\dots c'_M$. The first two are a greedy algorithm and a dynamic programming algorithm for our Markovian models. The last one is a greedy algorithm for our RNN models. 
+
+\subsubsection{Markovian Greedy}
+
+By our Markov assumption, we have the joint probability $p(y_1, \dots, y_M, c'_1, \dots, c'_M)$ is equal to $\prod_{i=1}^M p(y_i | c_i, \dots, c_{i-k+1})$ for some fixed context size $k$. 
+
+\subsubsection{Markovian Dynamic Programming}
+
+\subsubsection{RNN Greedy}
 
 \section{Experiments}
 
