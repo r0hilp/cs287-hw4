@@ -9,7 +9,7 @@ cmd = torch.CmdLine()
 -- Cmd Args
 cmd:option('-datafile', '', 'data file')
 cmd:option('-classifier', 'lstm', 'classifier to use')
-cmd:option('-kaggle_answers', '', 'validation kaggle answers')
+cmd:option('-kaggle_answers', 'data/valid_chars_kaggle_answer.txt', 'validation kaggle answers')
 
 cmd:option('-warm_start', '', 'torch file with previous model')
 cmd:option('-action', 'train', 'action: train or test')
@@ -36,14 +36,41 @@ cmd:option('-batch_size', 32, 'batch size for RNN')
 cmd:option('-hidden_size', 100, 'hidden size for RNN')
 cmd:option('-space_cutoff', 0.6, 'cutoff probability for a space in RNN greedy search')
 
+function compute_mse(kaggle_answers, spaces_per_sentence)
+   -- read kaggle answers into a table (put into rnn_model_kaggle?)
+   local valid_kaggle_answers = {}
+   local mse = 0
+   if kaggle_answers ~= '' then
+     local f = io.open(opt.kaggle_answers)
+     -- skip header
+     f:read("*l")
+     local count = 1
+     local line = f:read("*l")
+     while line ~= nil do
+       valid_kaggle_answers[count] = tonumber(line:split(",")[2])
+       line = f:read("*l")
+       count = count + 1
+     end
+     for i, j in pairs(valid_kaggle_answers) do
+       mse = mse + (j - spaces_per_sentence[i]) * (j - spaces_per_sentence[i])
+     end
+     mse = mse / #spaces_per_sentence
+     print('Valid MSE:', mse)
+   end
+   return mse
+end
+
 function greedy_search(X, CM, model)
   local gram_size = opt.gram_size
   local spaces = {}
+  local cur_sent = 1
+  spaces[1] = 0
 
   local context
   local is_space = false
   local i = 1
   while i <= X:size(1) - gram_size + 1 do
+    -- Get context
     if i == 1 then
       context = X:narrow(1, 1, gram_size - 1)
       i = gram_size
@@ -58,6 +85,11 @@ function greedy_search(X, CM, model)
       end
     end
 
+    if context[context:size(1)] == sentence_char then
+      cur_sent = cur_sent + 1
+      spaces[cur_sent] = 0
+    end
+
     -- Evaluate
     if CM then
       local h = hash(context)
@@ -65,14 +97,14 @@ function greedy_search(X, CM, model)
         if CM[h][1] == nil or CM[h][2] > CM[h][1] then
           -- Predict space
           is_space = true
-          table.insert(spaces, i)
+          spaces[cur_sent] = spaces[cur_sent] + 1
         end
       end
     elseif model then
       local pred = model:forward(context)
       if pred[2] > pred[1] then
         is_space = true
-        table.insert(spaces, i)
+        spaces[cur_sent] = spaces[cur_sent] + 1
       end
     end
   end
@@ -80,7 +112,6 @@ function greedy_search(X, CM, model)
   return spaces
 end
 
-<<<<<<< HEAD
 function dp_search(X, CM, model)
   local gram_size = opt.gram_size
 
@@ -123,12 +154,12 @@ function dp_search(X, CM, model)
               if CM[h][1] then
                 z[1] = CM[h][1]
               else
-                z[1] = 0
+                z[1] = opt.alpha
               end
               if CM[h][2] then
                 z[2] = CM[h][2]
               else
-                z[2] = 0
+                z[2] = opt.alpha
               end
             end
             z:div(z:sum())
@@ -159,7 +190,7 @@ function dp_search(X, CM, model)
     end
   end
 
-  print(pi)
+  --print(pi)
 
   local spaces = {}
   local _, p = torch.max(pi[X:size(1)], 1)
@@ -172,7 +203,25 @@ function dp_search(X, CM, model)
     p = bp[i][p + 1]
     --io.write(p, " ")
   end
-  return spaces
+
+  local cur_sent = 1
+  local space_sent = {}
+  space_sent[1] = 0
+
+  local i = #spaces
+  for j = 1, X:size(1) do
+    if X[j] == sentence_char then
+      cur_sent = cur_sent + 1
+      space_sent[cur_sent] = 0
+    end
+
+    if spaces[i] == j then
+      space_sent[cur_sent] = space_sent[cur_sent] + 1
+      i = i - 1
+    end
+  end
+
+  return space_sent
 end
 
 function X_to_context(X, gram_size)
@@ -674,19 +723,21 @@ function main()
 
      -- Test
      local spaces
+     local valid_spaces
      if opt.test_method == 'greedy' then
+       valid_spaces = greedy_search(valid_kaggle_X_arr, CM, nil) 
        spaces = greedy_search(test_X_arr, CM, nil) 
      elseif opt.test_method == 'dp' then
-       print('hi')
+       valid_spaces = dp_search(valid_kaggle_X_arr, CM, nil) 
        spaces = dp_search(test_X_arr, CM, nil)
-       --spaces = dp_search(valid_kaggle_X_arr, CM, nil)
-       print(spaces)
      end
+     compute_mse(opt.kaggle_answers, valid_spaces)
 
-     -- Write space locations
+     -- Write spaces
      local space_f = io.open('test_spaces_count.txt', 'w')
+     space_f:write("ID,Count")
      for i,v in ipairs(spaces) do
-       space_f:write(v .. "\n")
+       space_f:write(i .. "," .. v .. "\n")
      end
 
    elseif opt.classifier == 'nnlm' then
@@ -702,22 +753,23 @@ function main()
        model = torch.load(opt.warm_start).model
      end
 
-     print(test_X_arr:narrow(1, 1, 10))
-
      -- Test
      local spaces
+     local valid_spaces
      if opt.test_method == 'greedy' then
+       valid_spaces = greedy_search(valid_kaggle_X_arr, nil, model)
        spaces = greedy_search(test_X_arr, nil, model) 
      elseif opt.test_method == 'dp' then
+       valid_spaces = dp_search(valid_kaggle_X_arr, nil, model)
        spaces = dp_search(test_X_arr, nil, model)
-       --spaces = dp_search(valid_kaggle_X_arr, nil, model)
-       print(spaces)
      end
+     compute_mse(opt.kaggle_answers, valid_spaces)
 
-     -- Write space locations
+     -- Write spaces
      local space_f = io.open('test_spaces_count_nnlm.txt', 'w')
+     space_f:write("ID,Count")
      for i,v in ipairs(spaces) do
-       space_f:write(v .. "\n")
+       space_f:write(i .. "," .. v .. "\n")
      end
 
    elseif opt.classifier == 'lstm' or opt.classifier == 'gru' then
@@ -732,27 +784,8 @@ function main()
 
      local model = train_RNN_model(X, Y, valid_X, valid_Y, vocab_size, opt.embed, space_char, sentence_char)
 
-     -- read kaggle answers into a table (put into rnn_model_kaggle?)
-     local valid_kaggle_answers = {}
-     if opt.kaggle_answers ~= '' then
-       local f = io.open(opt.kaggle_answers)
-       -- skip header
-       f:read("*l")
-       local count = 1
-       local line = f:read("*l")
-       while line ~= nil do
-         valid_kaggle_answers[count] = tonumber(line:split(",")[2])
-         line = f:read("*l")
-         count = count + 1
-       end
-       local spaces_per_sentence = rnn_model_kaggle(model, valid_kaggle_X_arr, space_char, sentence_char, opt.space_cutoff)
-       local mse = 0
-       for i, j in pairs(valid_kaggle_answers) do
-         mse = mse + (j - spaces_per_sentence[i]) * (j - spaces_per_sentence[i])
-       end
-       mse = mse / #spaces_per_sentence
-       print('Valid MSE:', mse)
-     end
+     local spaces_per_sentence = rnn_model_kaggle(model, valid_kaggle_X_arr, space_char, sentence_char, opt.space_cutoff)
+     compute_mse(opt.kaggle_answers, spaces_per_sentence)
 
      -- Test
      local test_spaces_per_sentence = rnn_model_kaggle(model, test_X_arr, space_char, sentence_char, opt.space_cutoff)
