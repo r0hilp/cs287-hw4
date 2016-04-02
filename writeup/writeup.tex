@@ -258,7 +258,7 @@ After training, we also record the MSE for each model on valid with both greedy 
     GRU &  & 5.26 \\
     \hline
   \end{tabular}
-\caption{MSE on space insertion for valid.}
+\caption{MSE on space insertion for valid. The RNNs used $\mu = 0.3$ as cutoff probability.}
 \label{tab:mse} 
 \end{table}
 
@@ -287,23 +287,29 @@ For both the LSTM and GRU, we trained with hidden size 100, word embedding size 
 \caption{Training curves for GRU.}
 \end{figure}
 
-We experimented with the cutoff probability $\mu$ for the LSTM. We find that MSE on valid is optimized at $\mu = 0.3$, which was optimized by grid search on the LSTM trained for $20$ epochs. The results are given in the table below.  %% plot this?
+We experimented with the cutoff probability $\mu$ for the LSTM. We find that MSE on valid is optimized at $\mu = 0.3$, which was optimized by grid search on the LSTM trained for $20$ epochs. The results are given in the figure below.  %% plot this?
 
-\begin{center}
-\begin{tabular}{ c c}
-  \hline $\mu$ & MSE \\
-  \hline $0.1$ & 19.1\\
-  $0.2$ & 7.7\\
-  $0.3$ & 5.4\\
-  $0.4$ & 6.3\\
-  $0.5$ & 10.9\\
-  $0.6$ & 18.6\\
-  $0.7$ & 33.6\\
-  $0.8$ & 59.8\\
-  $0.9$ & 144.4\\
-  \hline
-\end{tabular}
-\end{center}
+\begin{figure}[H]
+\centering
+\includegraphics[scale=0.4]{mu_plot}
+\caption{Grid search for $\mu$}
+\end{figure}
+
+%\begin{center}
+%\begin{tabular}{ c c}
+%  \hline $\mu$ & MSE \\
+%  \hline $0.1$ & 19.1\\
+%  $0.2$ & 7.7\\
+%  $0.3$ & 5.4\\
+%  $0.4$ & 6.3\\
+%  $0.5$ & 10.9\\
+%  $0.6$ & 18.6\\
+%  $0.7$ & 33.6\\
+%  $0.8$ & 59.8\\
+%  $0.9$ & 144.4\\
+%  \hline
+%\end{tabular}
+%\end{center}
 
 \section{Conclusion}
 
