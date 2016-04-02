@@ -11,7 +11,7 @@
 
 In this assignment, we examine the problem of word segmentation. Given a string of characters without spaces, we want to determine where we can insert spaces to segment the string into words. 
 
-We implement and discuss several approaches to word segmentation in this paper, all trained on a portion of the Penn Treebank. Our first class of models are hidden Markov models with emission distributions given by an n-gram count model and an adaptation of Bengio's neural network language model (NNLM). Our second class of models are recurrent neural networks (RNNs), namely the Long Short Term Memory (LSTM) network and the Gated Recurrent Unit (GRU) network. Furthermore, we attempt to optimize the evaluation algorithms used to construct segmentations given a model. For the Markovian models, we use a dynamic programming algorithm which greatly improves predictive accuracy. We also make a small adjustment to the RNN evaluation algorithm that the performance of these models as well. 
+We implement and discuss several approaches to word segmentation in this paper, all trained on a portion of the Penn Treebank. Our first class of models are Markov models with emission distributions given by an n-gram count model and an adaptation of Bengio's neural network language model (NNLM). Our second class of models are recurrent neural networks (RNNs), namely the Long Short Term Memory (LSTM) network and the Gated Recurrent Unit (GRU) network. Furthermore, we attempt to optimize the evaluation algorithms used to construct segmentations given a model. For the Markovian models, we use a dynamic programming algorithm which greatly improves predictive accuracy. We also make a small adjustment to the RNN evaluation algorithm to improve the performance of these models as well. 
 
 In Section 2, we give a formal description of our problem and establish our notation. In Section 3, we give detailed descriptions of the algorithms listed above. In Section 4, we present our experimental results. In Section 5, we discuss our findings.
 
@@ -50,7 +50,7 @@ We can expand out the joint probability as
 
 \subsubsection{Count Model}
 
-\subsubsection{Neural Network Linear Model}
+\subsubsection{Neural Network Language Model (NNLM)}
 
 \subsection{Recurrent Neural Networks}
 
@@ -62,6 +62,55 @@ We can expand out the joint probability as
 
 
 \section{Experiments}
+
+We evaluate valid perplexity for all models per epoch, as well as MSE for the correct number of spaces once training is completed (i.e. the Kaggle metric).
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llcc}
+ \toprule
+ Model &  & Perplexity \\
+ \midrule
+ \textsc{2-gram Count} & & 1.400 & \\
+ \textsc{3-gram Count} & & 1.273 & \\
+ \textsc{4-gram Count} & & 1.183 & \\
+ \textsc{5-gram Count} & & 1.149 & \\
+ \textsc{NNLM} & & 1.162 & \\
+ \textsc{LSTM} & & 1.142 \\
+ \textsc{GRU} & & 1.138 \\
+ \bottomrule
+\end{tabular}
+\caption{\label{tab:results} Results on space insertion.}
+\end{table}
+
+\subsection{Count Model}
+
+For the count model, we 
+
+\subsection{NNLM}
+
+For the NNLM, we trained with hidden size 100, word embedding size 15, learning rate 0.01, batch size 32, and trained for 10 epochs (upon which validation perplexity stopped decreasing). We used a context size  (i.e. gram size) of 5. The NNLM takes about 30 seconds to train per epoch.
+
+Since the NNLM is Markovian, we 
+
+\subsection{RNN}
+
+For both the LSTM and GRU, we trained with hidden size 100, word embedding size 15, learning rate 0.1, batch size 32, and trained for 20 epochs. We track validation perplexity per epoch and halve learning rate if it stops decreasing (though this wasn't necessary in 20 epochs). The LSTM and GRU both take about 30 seconds per training epoch.
+
+The LSTM achieves an MSE of %%%%?
+The GRU achieves an MSE of 5.26.
+
+\begin{figure}[h]
+\centering
+\includegraphics[scale=0.5]{train_lstm}
+\caption{Training curves for LSTM.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[scale=0.5]{train_gru}
+\caption{Training curves for GRU.}
+\end{figure}
 
 \section{Conclusion}
 
