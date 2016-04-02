@@ -17,7 +17,7 @@ In Section 2, we give a formal description of our problem and establish our nota
 
 \section{Problem Description}
 
-Assume our training corpus consists of a sequence of characters $c_1, c_2, \dots, c_N$ where $c_i$ is drawn from a vocabulary $\mathcal{V}$ for every $i$. We use $<sp> \in \mathcal{V}$ to denote the space character. 
+Assume our training corpus consists of a sequence of characters $c_1, c_2, \dots, c_N$ where $c_i$ is drawn from a vocabulary $\mathcal{V}$ for every $i$. We use \texttt{<sp>} to denote the space character. 
 
 Our training data represents this corpus as a set of pairs $(c_i, y_i)$ for $i \in \{1, \dots, N\}$. The output variable $y_i$ is set to be equal to $1$ if the next character $c_{i+1}$ is not a space, and $2$ if it is a space. By default, we set $y_N = 1$ since $c_N$ is clearly not followed by a space. 
 
@@ -52,36 +52,180 @@ We can expand out the joint probability as
 
 \subsubsection{Neural Network Language Model (NNLM)}
 
+We use Bengio's neural network model like last assignment. It aim to directly learn a function from the context $c_{i-k+1}c_{i-k+2}\dots c_i$ to $y_i$. We have parameters
+\begin{itemize}
+  \item $W_0 \in \mathbb{R}^{|\mathcal{V}| \times d_{in}|}$, a lookup table of character embeddings
+  \item $W_1 \in \mathbb{R}^{kd_{in} \times d_{hid}}$, $b_1 \in \mathbb{R}^{d_{hid}}$,
+  \item $W_2 \in \mathbb{R}^{d_{hid} \times |\mcV|}$, $b_2 \in \mathbb{R}^{2}$
+\end{itemize}
+
+First, the character context is transformed into character embeddings by multiplying with $W_0$, and then concatenated to get a vector $\mathbf{x}_0$ of size $k \cdot d_{in}$. Then, we get a size $2$ vector of scores
+$$\mathbf{z} = \text{tanh}(\mathbf{x}_0W_1 + b_1)W_2 + b_2 \in \mathbb{R}^2$$
+
+Finally, we can force a probability distribution by taking the softmax $\hat{y} = \text{softmax}(\mathbf{z})$. Then, we have the probability that the next word is a space is $P(y_i = 2) = \hat{y}_2$, while the probability that it is not a space is $P(y_i = 1) = \hat{y}_1$. 
+
 \subsection{Recurrent Neural Networks}
+
+Our recurrent neural networks have the following parameters:
+\begin{itemize}
+  \item $W_0 \in \mathbb{R}^{|\mathcal{V}| \times d_{in}}$,
+  \item $\mathbf{s}_0 \in \mathbb{R}^{d_{hid}}$, the initial hidden state,
+  \item $R: \mathbb{R}^{d_{hid}} \times \mathbb{R}^{d_{in}} \to \mathbb{R}^{d_{hid}}$, a parameterized state transition function,
+  \item $W_1: \mathcal{R}^{d_{hid}} \to \mathbb{R}^2$, $b_1 \in \mathbb{R}^{2}$
+\end{itemize}
+
+The exact definition of $R$ depends on the type of RNN we are using. All of our RNNS are\textbf{transducer} RNNs, meaning that they consume an input sequence $c_1, \dots, c_M$ of characters and output a sequence $\hat{y}_1, \dots, \hat{y}_M$, where $\hat{y}_i = p(y_i | c_i, c_{i-1}, \dots, c_1)$. 
 
 \subsubsection{Long Short Term Memory Network}
 
+We use the LSTM model of Hochreiter and Schmidhuber, illustrated below:
+
+\begin{center}
+  \includegraphics[width=0.5\textwidth]{LSTM3-chain.png}
+\end{center}
+
+Formally, this requires the introduction of some new parameters
+\begin{itemize}
+  \item $W^{xi} \in \mathbb{R}^{d_{in} \times d_{hid}}$, $W^{si} \in \mathbb{R}^{d_{hid} \times d_{hid}}$, $b^i \in \mathbb{R}^{d_{hid}}$, 
+  \item $W^{xi} \in \mathbb{R}^{d_{in} \times d_{hid}}$, $W^{sj} \in \mathbb{R}^{d_{hid} \times d_{hid}}$, $b^j \in \mathbb{R}^{d_{hid}}$,
+  \item $W^{xi} \in \mathbb{R}^{d_{in} \times d_{hid}}$, $W^{sf} \in \mathbb{R}^{d_{hid} \times d_{hid}}$, $b^f \in \mathbb{R}^{d_{hid}}$,
+  \item $W^{xi} \in \mathbb{R}^{d_{in} \times d_{hid}}$, $W^{so} \in \mathbb{R}^{d_{hid} \times d_{hid}}$, $b^o \in \mathbb{R}^{d_{hid}}$,
+  \item $\mathbf{C}_0 \in \mathbb{R}^{d_{hid}}$, the initial cell state
+\end{itemize}
+
+Let $c_i$ be our input character, and let $\mathbf{C}_{i-1}$ and $\mathbf{s}_{i-1}$ be the previously calculated cell and hidden states, respectively. First, we transform $c_i$ into a vector $\mathbf{x}_i$ of size $d_{in}$ by multiplying it by $W_0$. Then, we calculate the four following vectors
+\begin{align*}
+  \mathbf{i} &= \text{tanh}(\mathbf{x}_iW^{xi} + \mathbf{s}_{i-1}W^{si} + b^i \\
+  \mathbf{j} &= \sigma(\mathbf{x}_iW^{xj} + \mathbf{s}_{i-1}W^{sj} + b^j \\
+  \mathbf{i} &= \sigma(\mathbf{x}_iW^{xf} + \mathbf{s}_{i-1}W^{sf} + b^f \\
+  \mathbf{i} &= \text{tanh}(\mathbf{x}_iW^{xo} + \mathbf{s}_{i-1}W^{so} + b^o \\
+\end{align*}
+and combine them to produce the new cell state and hidden state
+\begin{align*}
+  \mathbf{C}_i &= \mathbf{j} \odot \mathbf{i} + \mathbf{f} \odot \mathbf{C}_{i-1} \\
+  \mathbf{s}_i &= R(\mathbf{s}_{i-1}, \mathbf{x}_i) = \text{tanh}(\mathbf{C}_i) \odot \mathbf{o}
+\end{align*}
+Then, we multiply $\mathbf{s}_i$ by $W_1$ to produce an output vector $\mathbf{z}_i$ of size $2$. Finally, we force a probability distribution by taking the softmax to get the desired output $\hat{y}_i = \text{softmax}(\mathbf{z}_i)$. 
+
 \subsubsection{Gated Recurrent Unit Network}
 
+We use the GRU model of Cho et al. This model requires the following parameters in addition to the generic RNN parameters
+\begin{itemize}
+  \item $W^{xt} \in \mathbb{R}^{d_{in} \times d_{hid}}$, $W^{st} \in \mathbb{R}^{d_{hid} \times d_{hid}}$, $b^t \in \mathbb{R}^{d_{hid}}$, 
+  \item $W^{xr} \in \mathbb{R}^{d_{in} \times d_{hid}}$, $W^{sr} \in \mathbb{R}^{d_{hid} \times d_{hid}}$, $b^r \in \mathbb{R}^{d_{hid}}$, 
+  \item $W^x \in \mathbb{R}^{d_{in} \times d_{hid}}$, $W^s \in \mathbb{R}^{d_{hid} \times d_{hid}}$, $b \in \mathbb{R}^{d_{hid}}$
+\end{itemize}
+
+Let $c_i$ be our input character, and let $\mathbf{s}_{i-1}$ be the previously calculated hidden state. First, we transform $c_i$ into a vector $\mathbf{x}_i$ of size $d_{in}$ by multiplying it by $W_0$. Then, we calculate the following three vectors
+\begin{align*}
+  \widetilde{\mathbf{h}} &= \text{tanh}(\mathbf{x}_iW^{x} + (\mathbf{r} \odot \mathbf{s}_{i-1})W^s + b) \\
+  \mathbf{r} &= \sigma(\mathbf{x}_iW^{xr} + \mathbf{s}_{i-1}W^{sr} + b^r) \\
+  \mathbf{t} &= \sigma(\mathbf{x}_iW^{xt} + \mathbf{s}_{i-1}W^{st} + b^t)
+\end{align*}
+and combine them to produce the new hidden state
+\begin{align*}
+  \mathbf{s}_i &= R(\mathbf{s}_{i-1}, \mathbf{x}_i) = (1 - \mathbf{t}) \odot \widetilde{\mathbf{h}} + \mathbf{t} \odot \mathbf{s}_{i-1}
+\end{align*}
+Then, we multiply $\mathbf{s}_i$ by $W_1$ to produce an output vector $\mathbf{z}_i$ of size $2$. Finally, we force a probability distribution by taking the softmax to get the desired output $\hat{y}_i = \text{softmax}(\mathbf{z}_i)$. 
 \subsection{Evaluation Algorithms}
 
+We have three different algorithms that we use to take a model and use it to predict a sequence $y_1\dots y_M$ for an input sequence $c'_1\dots c'_M$. The first two are a greedy algorithm and a dynamic programming algorithm for our Markovian models. The last one is a greedy algorithm for our RNN models. In all of them, we will denote our model by a function $f$ from the input space to the space/non-space probability distribution. 
+
+\subsubsection{Markovian Greedy}
+
+The algorithm is given formally. It simply consists of greedily predicting each $y_i$ and recording how many $y_i = 2$ per sentence. 
+
+\begin{algorithmic}
+  \Procedure{MarkovGreedy}{$c'_1, \dots, c'_M$, $f$}
+    \State{$sn \leftarrow 1$}
+    \Comment{Set sentence number to $1$}
+    \State{$S = \{\}$}
+    \Comment{Initialize empty dictionary}
+    \For{$i \in 1, \dots, M$}
+      \If{$c'_i = </s>$}
+        \State{$sn \leftarrow sn + 1$}
+        \State{$S[sn] \leftarrow 0$}
+        \Comment{Increment sentence number at end of sentence}
+      \EndIf{}
+      \State{$y \leftarrow f(c'_i)_2$}
+      \Comment{Feed $c'_i$ into the model}
+      \If{$y \geq 1/2$}
+        $S[sn] \leftarrow S[sn] + 1$
+      \EndIf{}
+    \EndFor{}
+    \Return{$S$}
+  \EndProcedure{}
+\end{algorithmic}
+
+\subsubsection{Markovian Dynamic Programming}
+
+\subsubsection{RNN Greedy}
+
+The algorithm is given formally below. In plain language, we simply feed in each character one at a time to our RNN. If the RNN predicts a space, we record that in our output dictionary and feed the space in and then continue to the next character. 
+
+\begin{algorithmic}
+  \Procedure{RNNGreedy}{$c'_1, \dots, c'_M$, $f$, $\mu$, $<sp>$, $</s>$}
+    \State{$i \leftarrow 1$}
+    \State{$sn \leftarrow 1$}
+    \Comment{Set sentence number to $1$}
+    \State{$S = \{\}$}
+    \Comment{Initialize empty dictionary}
+    \State{$S[sn] = 0$}
+    \While{$i \leq M$}
+      \If{$c'_i = </s>$}
+        \State{$sn \leftarrow sn + 1$}
+        \State{$S[sn] \leftarrow 0$}
+        \Comment{Increment sentence number at end of sentence}
+      \EndIf{}
+      \State{$y \leftarrow f(c'_i)_2$}
+      \Comment{Feed $c'_i$ into the model}
+      \If{$y \geq \mu$}
+        \State{$y \leftarrow f(<sp>)$}
+        \State{$S[sn] = S[sn] + 1$}
+        \Comment{Feed a space into the model}
+      \EndIf{}
+      \State{$i \leftarrow i+1$}
+    \EndWhile{}
+  \Return{$S$}
+  \EndProcedure{}
+\end{algorithmic}
 
 \section{Experiments}
 
-We evaluate valid perplexity for all models per epoch, as well as MSE for the correct number of spaces once training is completed (i.e. the Kaggle metric).
+We evaluate train and valid perplexity for all models.
 
 \begin{table}[h]
 \centering
 \begin{tabular}{llcc}
  \toprule
- Model &  & Perplexity \\
+ Model &  & Train PPL & Valid PPL \\
  \midrule
- \textsc{2-gram Count} & & 1.400 & \\
- \textsc{3-gram Count} & & 1.273 & \\
- \textsc{4-gram Count} & & 1.183 & \\
- \textsc{5-gram Count} & & 1.149 & \\
- \textsc{NNLM} & & 1.162 & \\
- \textsc{LSTM} & & 1.142 \\
- \textsc{GRU} & & 1.138 \\
+ \textsc{2-gram Count} & 1.397 & 1.400 \\
+ \textsc{3-gram Count} & 1.267 & 1.273 \\
+ \textsc{4-gram Count} & 1.173 & 1.183  \\
+ \textsc{5-gram Count} & 1.122 & 1.149 \\
+ \textsc{NNLM} & & 1.153 & 1.162 \\
+ \textsc{LSTM} & & 1.110 & 1.142 \\
+ \textsc{GRU} &  & 1.097 & 1.138 \\
  \bottomrule
 \end{tabular}
-\caption{\label{tab:results} Results on space insertion.}
+\caption{\label{tab:results} Perplexity on space insertion.}
 \end{table}
+
+After training, we also record the MSE for each model.
+
+\begin{center}
+  \begin{tabular}{| c | c | c |}
+    \hline Model & Algorithm & MSE \\
+    \hline Count & Greedy & \\
+    & DP & \\
+    NNLM & Greedy & \\
+    & DP & \\
+    LSTM & Greedy & \\
+    GRU & Greedy & \\
+    \hline
+  \end{tabular}
+\end{center}
 
 \subsection{Count Model}
 
@@ -112,7 +256,29 @@ The GRU achieves an MSE of 5.26.
 \caption{Training curves for GRU.}
 \end{figure}
 
+
+
+The MSE for RNN greedy is that for $\mu = 0.3$, which was optimized by grid search on an LSTM trained for $20$ epochs. The results are given in the table below. 
+
+\begin{center}
+\begin{tabular}{| c | c |}
+  \hline $\mu$ & MSE \\
+  \hline $0.1$ & 19.1\\
+  $0.2$ & 7.7\\
+  $0.3$ & 5.4\\
+  $0.4$ & 6.3\\
+  $0.5$ & 10.9\\
+  $0.6$ & 18.6\\
+  $0.7$ & 33.6\\
+  $0.8$ & 59.8\\
+  $0.9$ & 144.4\\
+  \hline
+\end{tabular}
+\end{center}
+
 \section{Conclusion}
+
+
 
 \bibliographystyle{apalike}
 \bibliography{writeup}
