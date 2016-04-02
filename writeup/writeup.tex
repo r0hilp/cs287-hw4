@@ -61,7 +61,7 @@ For our models we set $\alpha = 0.1$.
 
 \subsubsection{Neural Network Language Model (NNLM)}
 
-We use Bengio's language model like last assignment to model equation~\ref{eq:prob}. We have parameters
+We use the language model from \cite{bengio2003nnlm} like last assignment to model equation~\ref{eq:prob}. We have parameters
 \begin{itemize}
   \item $W_0 \in \mathbb{R}^{|\mathcal{V}| \times d_{in}}$, a lookup table of character embeddings
   \item $W_1 \in \mathbb{R}^{nd_{in} \times d_{hid}}$, $b_1 \in \mathbb{R}^{d_{hid}}$,
@@ -89,7 +89,7 @@ The exact definition of $R$ depends on the type of RNN we are using. All of our 
 
 \subsubsection{Long Short Term Memory Network}
 
-We use the LSTM model of Hochreiter and Schmidhuber, illustrated below:
+We use the LSTM model of \cite{hochreiter1997lstm}, illustrated below:
 
 \begin{center}
   \includegraphics[width=0.5\textwidth]{LSTM3-chain.png}
@@ -122,7 +122,7 @@ As hyperparameters, we use $d_{in} = 15, d_{hid} = 100$ as in the NNLM.
 
 \subsubsection{Gated Recurrent Unit Network}
 
-We use the GRU model of Cho et al. This model requires the following parameters in addition to the generic RNN parameters
+We use the GRU model of \cite{cho2014gru}. This model requires the following parameters in addition to the generic RNN parameters
 \begin{itemize}
   \item $W^{xt} \in \mathbb{R}^{d_{in} \times d_{hid}}$, $W^{st} \in \mathbb{R}^{d_{hid} \times d_{hid}}$, $b^t \in \mathbb{R}^{d_{hid}}$, 
   \item $W^{xr} \in \mathbb{R}^{d_{in} \times d_{hid}}$, $W^{sr} \in \mathbb{R}^{d_{hid} \times d_{hid}}$, $b^r \in \mathbb{R}^{d_{hid}}$, 
@@ -313,7 +313,13 @@ We experimented with the cutoff probability $\mu$ for the LSTM. We find that MSE
 
 \section{Conclusion}
 
+Our results for perplexity on the validation set with spaces were generally as expected. Since our RNNs could dispense with the Markovian assumption and capture the \emph{entire} context of a character, it seems clear that they had the lowest perplexity out of all the models. However, the $6$-gram count model came quite close, which suggests that we experience rapidly diminishing marginal returns as the n-gram size of our model becomes larger. 
 
+For our MSE results on the validation set without spaces, it seems that optimizing our test-time sequence prediction algorithms contributed the most to lowering the MSE. For our RNNs, adjusting the space cutoff $\mu$ had a very pronounced effect on the MSE, lowering from $10.9$ at the standard $\mu = 0.5$ to $5.4$ at $\mu = 0.3$. While we did not select our value based on any insight other than grid search, we conjecture that this is due to features of the English language such as the average lengths of words. 
+
+Even more interestingly, our best-performing model on this validation set was a simple $5$-gram count model with the Viterbi algorithm used for test time sequence prediction. This is a clear demonstration of the fact that the greedy evaluation used at test time for the Markovian models and the RNNs is far from optimal.  
+
+From our work here, we have a couple more ideas for improving our word segmentation models. The first thing to note is that the count model is quite strong with the Viterbi algorithm, but we don't perform any smoothing besides Laplace smoothing. Therefore, using Witten-Bell or Kneser-Ney smoothing may improve our model even further. The second thing to note is that the greedy evaluation we use for our RNNs is likely suboptimal, but the architecture doesn't give us much room to do anything else. Therefore, the best way to improve our RNNs would be to make them bidirectional, which would allow them to use the backward sequence and learn any right-to-left language relationships in the sequence. The other possible way to improve our RNNs is to stack them, but we do not have much of a sense for how much this would improve word segmentation.  
 
 \bibliographystyle{apalike}
 \bibliography{writeup}
