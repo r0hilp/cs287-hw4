@@ -19,50 +19,61 @@ In Section 2, we give a formal description of our problem and establish our nota
 
 Assume our training corpus consists of a sequence of characters $c_1, c_2, \dots, c_N$ where $c_i$ is drawn from a vocabulary $\mathcal{V}$ for every $i$. We use \texttt{<sp>} to denote the space character. 
 
-Our training data represents this corpus as a set of pairs $(c_i, y_i)$ for $i \in \{1, \dots, N\}$. The output variable $y_i$ is set to be equal to $1$ if the next character $c_{i+1}$ is not a space, and $2$ if it is a space. By default, we set $y_N = 1$ since $c_N$ is clearly not followed by a space. 
+Our training data represents this corpus as a pair of sequences $c_1, \ldots, c_N$ and $y_1, \ldots y_N$. The output variable $y_i \in \{0, 1\}$ indicates if character $c_{i+1}$ is a space. By default, we set $y_N = 1$ since $c_N$ is clearly not followed by a space. We desire to find a function $f : \mcV^k \to \mathbb{R}$ on sequences of characters that computes the probability of the next character being a space, i.e.
+$$f(c_1, \ldots, c_k) = p(c_{k+1} = \texttt{<sp>} | c_1, \ldots, c_k) = p(y_k = 1 | c_1, \ldots, c_k)$$
 
-Calculating a word segmentation is equivalent to taking an input sequence of characters $\mathbf{c}' = c_1c_2\dots c_M$ of characters as input and outputting a sequence $y_1y_2\dots y_M$, where $y_i = 2$ if we insert a space after $c_i$ and $1$ if not. 
+In the test setup, calculating a word segmentation is equivalent to taking an input sequence of characters $\mathbf{c} \in \mcV^M$ without spaces and outputting a sequence $\mathbf{c}' \in \mcV^{M'}$ with spaces inserted, s.t. the corresponding sequence of indicators $\mathbf{y} = y_1y_2 \ldots y_{M'}$ has $y_i = 1$ iff $c_{i+1}'$ is a space.
 
-We determine the \emph{best} word segmentation by finding the sequence $y_1y_2\dots y_M$ that maximizes the joint probability function $f(c_1, \dots, c_M, y_1, \dots, y_M) = p(c_1, \dots, c_M, y_1, \dots, y_M)$. 
+We determine the \emph{best} word segmentation by finding the sequence $\mathbf{c}'$ with corresponding $\mathbf{y}$ that maximizes the score
+$$\prod_{k=1}^{M'} p(y_k | c_1', \ldots, c_k') = \prod_{k=1}^{M'} f(c_1', \ldots, c_k') $$
 
-For the approaches we are considering, this requires us to train a model that will take an input character $c$ and output the probability that the next character is a space. Then, we apply an evaluation algorithm at test time to generate the best sequence. 
+For the approaches we are considering, this requires us to train a function $f$. Then, we apply an evaluation algorithm at test time (either based on greedy or dynamic programming) to generate such a segmented sequence. See Section 3 for details.
 
 \subsection{Evaluation}
 
-We evaluate our models on two validation sets. These validation sets contain the same characters, but one already contains spaces while the other does not. 
+We evaluate our models on a validation set in two different ways. The validation set, a sequence of characters with spaces, can be considered as either a single sequence or a set of sentences.
 
-First, note that our model is essentially a language model, taking in a character and outputting a simple distribution on the next character. Therefore, we can calculate perplexity over the validation set with spaces. This is equal to the exponential of the average negative log likelihood. Since we only have two classes, the perplexity is at most $2$. 
+First, we interpret our model as a language model that takes in a sequence of characters $c_1, \ldots, c_i$ and outputs a probability on the next character being a space, i.e. $p(c_{i+1} = \texttt{<sp>} | c_i \ldots c_1)$. Therefore, we can calculate perplexity over the validation set as a single sequence. This is equal to the exponential of the average negative log likelihood,
+$$PPL = \exp\left(-\frac{1}{N} \sum_{i=1}^N \log p(c_{i+1} = \texttt{<sp>} | c_i \ldots c_1)\right)$$
 
-For our second validation set, we can run our model and evaluation algorithm to get a word segmentation over the entire set. Here, we keep track of the number of spaces inserted into each sentence and compute the mean squared error of these numbers with respect to the provided answers for each sentence. 
+Second, we can run our model and evaluation algorithm to get a word segmentation over the entire set. Here, we keep track of the number of spaces inserted into each sentence, then compute the mean squared error (MSE) with respect to the true number of spaces per sentence. This is the Kaggle metric.
 
 \section{Model and Algorithms}
 
 \subsection{Markovian Models}
 
-The key to these models is the Markov assumption, which states that $p(y_i | y_1, \dots, y_{i-1}) = p(y_i | y_{i-k+1}, \dots, y_{i-1})$ for some fixed $k$. This allows us to get a simple expression for the joint probability that we can calculate using either a count-based model or a neural network model. 
+The key to training tractable models is the Markov assumption. This allows us to get a simple expression for the joint probability that we can calculate using either a count-based model or a windowed feedforward neural network model. Recall that we desire to model
+$$p(c_i = \texttt{<sp>} | c_1, \ldots, c_{i-1}) = p(y_i = 1 | c_1, \ldots, c_{i-1})$$
 
-We can expand out the joint probability as 
-\begin{align*}
-  p(c_1, \dots, c_M, y_1, \dots, y_M) &= p(c_1, \dots, c_M | y_1, \dots, y_M)p(y_1, \dots, y_M) \\
-  &= \prod_{i=1}^M p(c_i | c_1, \dots, c_{i-1}, y_1, \dots, y_M)p(y_i | y_1, \dots, y_{i-1}) \\ 
-  &= \prod_{i=1}^M p(c_i | c_1, \dots, c_{i-1}, y_1, \dots, y_M)p(y_i | y_{i-k+1}, \dots, y_{i-1}) \\
-\end{align*}
+Under the Markov assumption, we only need to consider the last $n-1$ characters, so that we only need to model
+\begin{equation}\label{eq:prob}
+p(c_i = \texttt{<sp>} | c_{i-1}, \ldots, c_{i-n+1}) = p(y_i = 1 | c_{i-1}, \ldots, c_{i-n+1})
+\end{equation}
+
+We call models with such an assumption an n-gram model.
 
 \subsubsection{Count Model}
 
+To model equation~\ref{eq:prob} as an n-gram model, we compute co-occurrence counts $C(c_i = \texttt{<sp>}, c_{i-1}, \ldots, c_{i-n+1})$ and $C(c_i \neq \texttt{<sp>}, c_{i-1}, \ldots, c_{i-n+1})$ in the training sequence. Then with a smoothing parameter $\alpha$, we let
+$$p(c_i = \texttt{<sp>} | c_{i-1}, \ldots, c_{i-n+1}) = \frac{\alpha + C(c_i = \texttt{<sp>}, c_{i-1}, \ldots, c_{i-n+1})}{2\alpha + C(c_i = \texttt{<sp>}, c_{i-1}, \ldots, c_{i-n+1}) + C(c_i \neq \texttt{<sp>}, c_{i-1}, \ldots, c_{i-n+1})}$$
+
+For our models we set $\alpha = 0.1$.
+
 \subsubsection{Neural Network Language Model (NNLM)}
 
-We use Bengio's neural network model like last assignment. It aim to directly learn a function from the context $c_{i-k+1}c_{i-k+2}\dots c_i$ to $y_i$. We have parameters
+We use Bengio's language model like last assignment to model equation~\ref{eq:prob}. We have parameters
 \begin{itemize}
-  \item $W_0 \in \mathbb{R}^{|\mathcal{V}| \times d_{in}|}$, a lookup table of character embeddings
-  \item $W_1 \in \mathbb{R}^{kd_{in} \times d_{hid}}$, $b_1 \in \mathbb{R}^{d_{hid}}$,
-  \item $W_2 \in \mathbb{R}^{d_{hid} \times |\mcV|}$, $b_2 \in \mathbb{R}^{2}$
+  \item $W_0 \in \mathbb{R}^{|\mathcal{V}| \times d_{in}}$, a lookup table of character embeddings
+  \item $W_1 \in \mathbb{R}^{nd_{in} \times d_{hid}}$, $b_1 \in \mathbb{R}^{d_{hid}}$,
+  \item $W_2 \in \mathbb{R}^{d_{hid} \times 2}$, $b_2 \in \mathbb{R}^{2}$
 \end{itemize}
 
-First, the character context is transformed into character embeddings by multiplying with $W_0$, and then concatenated to get a vector $\mathbf{x}_0$ of size $k \cdot d_{in}$. Then, we get a size $2$ vector of scores
+First, the character context is transformed into character embeddings by multiplying with $W_0$, and then concatenated to get a vector $\mathbf{x}_0$ of size $n \cdot d_{in}$. Then, we get a size $2$ vector of scores
 $$\mathbf{z} = \text{tanh}(\mathbf{x}_0W_1 + b_1)W_2 + b_2 \in \mathbb{R}^2$$
 
-Finally, we can force a probability distribution by taking the softmax $\hat{y} = \text{softmax}(\mathbf{z})$. Then, we have the probability that the next word is a space is $P(y_i = 2) = \hat{y}_2$, while the probability that it is not a space is $P(y_i = 1) = \hat{y}_1$. 
+Finally, we can force a probability distribution by taking the softmax $\hat{y} = \text{softmax}(\mathbf{z})$. Then, we have the probability that the next word is a space is $\hat{y}_2$.
+
+As hyperparameters, we set $d_{in} = 15, d_{hid} = 100$, and we used a gram size of 5.
 
 \subsection{Recurrent Neural Networks}
 
@@ -71,10 +82,10 @@ Our recurrent neural networks have the following parameters:
   \item $W_0 \in \mathbb{R}^{|\mathcal{V}| \times d_{in}}$,
   \item $\mathbf{s}_0 \in \mathbb{R}^{d_{hid}}$, the initial hidden state,
   \item $R: \mathbb{R}^{d_{hid}} \times \mathbb{R}^{d_{in}} \to \mathbb{R}^{d_{hid}}$, a parameterized state transition function,
-  \item $W_1: \mathcal{R}^{d_{hid}} \to \mathbb{R}^2$, $b_1 \in \mathbb{R}^{2}$
+  \item $W_1: \mathbb{R}^{d_{hid}} \to \mathbb{R}^2$, $b_1 \in \mathbb{R}^{2}$
 \end{itemize}
 
-The exact definition of $R$ depends on the type of RNN we are using. All of our RNNS are\textbf{transducer} RNNs, meaning that they consume an input sequence $c_1, \dots, c_M$ of characters and output a sequence $\hat{y}_1, \dots, \hat{y}_M$, where $\hat{y}_i = p(y_i | c_i, c_{i-1}, \dots, c_1)$. 
+The exact definition of $R$ depends on the type of RNN we are using. All of our RNNS are \textbf{transducer} RNNs, meaning that they consume an input sequence $c_1, \dots, c_M$ of characters and output a sequence $\hat{y}_1, \dots, \hat{y}_M$, where $\hat{y}_i = p(y_i | c_i, c_{i-1}, \dots, c_1)$. 
 
 \subsubsection{Long Short Term Memory Network}
 
@@ -95,10 +106,10 @@ Formally, this requires the introduction of some new parameters
 
 Let $c_i$ be our input character, and let $\mathbf{C}_{i-1}$ and $\mathbf{s}_{i-1}$ be the previously calculated cell and hidden states, respectively. First, we transform $c_i$ into a vector $\mathbf{x}_i$ of size $d_{in}$ by multiplying it by $W_0$. Then, we calculate the four following vectors
 \begin{align*}
-  \mathbf{i} &= \text{tanh}(\mathbf{x}_iW^{xi} + \mathbf{s}_{i-1}W^{si} + b^i \\
-  \mathbf{j} &= \sigma(\mathbf{x}_iW^{xj} + \mathbf{s}_{i-1}W^{sj} + b^j \\
-  \mathbf{i} &= \sigma(\mathbf{x}_iW^{xf} + \mathbf{s}_{i-1}W^{sf} + b^f \\
-  \mathbf{i} &= \text{tanh}(\mathbf{x}_iW^{xo} + \mathbf{s}_{i-1}W^{so} + b^o \\
+  \mathbf{i} &= \text{tanh}(\mathbf{x}_iW^{xi} + \mathbf{s}_{i-1}W^{si} + b^i) \\
+  \mathbf{j} &= \sigma(\mathbf{x}_iW^{xj} + \mathbf{s}_{i-1}W^{sj} + b^j) \\
+  \mathbf{f} &= \sigma(\mathbf{x}_iW^{xf} + \mathbf{s}_{i-1}W^{sf} + b^f) \\
+  \mathbf{o} &= \sigma(\mathbf{x}_iW^{xo} + \mathbf{s}_{i-1}W^{so} + b^o) \\
 \end{align*}
 and combine them to produce the new cell state and hidden state
 \begin{align*}
@@ -106,6 +117,8 @@ and combine them to produce the new cell state and hidden state
   \mathbf{s}_i &= R(\mathbf{s}_{i-1}, \mathbf{x}_i) = \text{tanh}(\mathbf{C}_i) \odot \mathbf{o}
 \end{align*}
 Then, we multiply $\mathbf{s}_i$ by $W_1$ to produce an output vector $\mathbf{z}_i$ of size $2$. Finally, we force a probability distribution by taking the softmax to get the desired output $\hat{y}_i = \text{softmax}(\mathbf{z}_i)$. 
+
+As hyperparameters, we use $d_{in} = 15, d_{hid} = 100$ as in the NNLM.
 
 \subsubsection{Gated Recurrent Unit Network}
 
@@ -133,43 +146,60 @@ We have three different algorithms that we use to take a model and use it to pre
 
 \subsubsection{Markovian Greedy}
 
-The algorithm is given formally. It simply consists of greedily predicting each $y_i$ and recording how many $y_i = 2$ per sentence. 
+%The algorithm is given formally. It simply consists of greedily predicting each $y_i$ and recording how many $y_i = 1$ per sentence. 
+%
+%\begin{algorithmic}
+%  \Procedure{MarkovGreedy}{$(c_1, \dots, c_M)$, $f$}
+%    \State{$sn \leftarrow 1$}
+%    \Comment{Set sentence number to $1$}
+%    \State{$S = \{\}$}
+%    \Comment{Initialize empty dictionary}
+%    \For{$i \in 1, \dots, M$}
+%      \If{$c'_i = </s>$}
+%        \State{$sn \leftarrow sn + 1$}
+%        \State{$S[sn] \leftarrow 0$}
+%        \Comment{Increment sentence number at end of sentence}
+%      \EndIf{}
+%      \State{$y \leftarrow f(c'_i)_2$}
+%      \Comment{Feed $c'_i$ into the model}
+%      \If{$y \geq 1/2$}
+%        $S[sn] \leftarrow S[sn] + 1$
+%      \EndIf{}
+%    \EndFor{}
+%    \Return{$S$}
+%  \EndProcedure{}
+%\end{algorithmic}
 
-\begin{algorithmic}
-  \Procedure{MarkovGreedy}{$c'_1, \dots, c'_M$, $f$}
-    \State{$sn \leftarrow 1$}
-    \Comment{Set sentence number to $1$}
-    \State{$S = \{\}$}
-    \Comment{Initialize empty dictionary}
-    \For{$i \in 1, \dots, M$}
-      \If{$c'_i = </s>$}
-        \State{$sn \leftarrow sn + 1$}
-        \State{$S[sn] \leftarrow 0$}
-        \Comment{Increment sentence number at end of sentence}
-      \EndIf{}
-      \State{$y \leftarrow f(c'_i)_2$}
-      \Comment{Feed $c'_i$ into the model}
-      \If{$y \geq 1/2$}
-        $S[sn] \leftarrow S[sn] + 1$
-      \EndIf{}
-    \EndFor{}
-    \Return{$S$}
-  \EndProcedure{}
-\end{algorithmic}
+Given a sequence without spaces $c_1, \ldots, c_M$, we proceed greedily as follows. Given a context $c_{i-n+1}, \ldots, c_{i-1}$, we compute $p(c_i = \texttt{<sp>} | c_{i-1} \ldots c_{i-n+1})$. If this is greater than $0.5$, we insert a space and repeat with context $c'_{i-n+1}, \ldots, c'_{i-1}$ with $c'_{i-1} = \texttt{<sp>}$ and $c'_j = c_{j+1}$; otherwise we set $c'_{i-1}$ as the next character in the sequence.
+
+In this manner we can process the entire test sequence to output spaces.
 
 \subsubsection{Markovian Dynamic Programming}
 
+Dynamic programming seeks to optimize the joint probability of a sequence with spaces:
+$$\prod_{i=1}^{N} p(c_i = \texttt{<sp>} | c_{i-1}, \ldots, c_{i-n+1})$$
+Note that for a bigram model, if we assume that spaces cannot follow spaces, this probability can be optimized by the greedy algorithm (since the only terms in this probability are of the form $p(c_i = \texttt{<sp>} | c_{i-1})$ for $c_{i-1}$ a non-space).
+
+In a general n-gram model, we use a version of the Viterbi algorithm. We keep a table $\pi(i, B)$ where $B$ is a bitmask of length $n$. The bits of $B$ indicate which characters in the original sequence $c_{i-n+1}, \ldots, c_{i-1}, c_i$ have a space following, so that the least significant bit indicates if $y_i = 1$. Then $\pi(i, B)$ is the log probability of $y_i$ given the preceding $n-1$ characters as determined by the space bits from $B$.
+
+The Viterbi transition is then given by the recursion
+$$\pi(i, B) = \max_{B'} \pi(i-1, B') + g(\mathbf{c}_{(i-n+1):i}, B, B')$$
+Here, $B'$ is a bitmask which has the last $n-1$ bits equalling the first $n-1$ bits of $B$, and $g(\mathbf{c}_{(i-n+1):i}, B, B')$ gives
+$$\log p(y_i | c_i, \ldots, c_{i-n+1}, y_{i-1}, \ldots, y_{i-n+1})$$
+
+We can compute the optimal insertion of spaces by computing the table for $\pi$ and saving backpointers.
+
 \subsubsection{RNN Greedy}
 
-The algorithm is given formally below. In plain language, we simply feed in each character one at a time to our RNN. If the RNN predicts a space, we record that in our output dictionary and feed the space in and then continue to the next character. 
+The algorithm is given formally below. In plain language, we simply feed in each character one at a time to our RNN. We set a cutoff probability $\mu \in (0, 1)$, so that we insert a space if the RNN outputs probability $> \mu$ of the next character being space. If the RNN predicts a space, we record that in our output dictionary, feed the space back into the RNN, and then continue to the next character. 
 
 \begin{algorithmic}
-  \Procedure{RNNGreedy}{$c'_1, \dots, c'_M$, $f$, $\mu$, $<sp>$, $</s>$}
+  \Procedure{RNNGreedy}{$c'_1, \dots, c'_M$, $f$, $\mu$}
     \State{$i \leftarrow 1$}
     \State{$sn \leftarrow 1$}
     \Comment{Set sentence number to $1$}
     \State{$S = \{\}$}
-    \Comment{Initialize empty dictionary}
+    \Comment{$S$ maps sentences to number of spaces predicted}
     \State{$S[sn] = 0$}
     \While{$i \leq M$}
       \If{$c'_i = </s>$}
@@ -192,7 +222,7 @@ The algorithm is given formally below. In plain language, we simply feed in each
 
 \section{Experiments}
 
-We evaluate train and valid perplexity for all models.
+We evaluate train and valid perplexity for all models. Table~\ref{tab:results} summarizes results.
 
 \begin{table}[h]
 \centering
@@ -200,10 +230,10 @@ We evaluate train and valid perplexity for all models.
  \toprule
  Model &  & Train PPL & Valid PPL \\
  \midrule
- \textsc{2-gram Count} & 1.397 & 1.400 \\
- \textsc{3-gram Count} & 1.267 & 1.273 \\
- \textsc{4-gram Count} & 1.173 & 1.183  \\
- \textsc{5-gram Count} & 1.122 & 1.149 \\
+ \textsc{2-gram Count} & &1.397 & 1.400 \\
+ \textsc{3-gram Count} & &1.267 & 1.273 \\
+ \textsc{4-gram Count} & &1.173 & 1.183  \\
+ \textsc{5-gram Count} & &1.122 & 1.149 \\
  \textsc{NNLM} & & 1.153 & 1.162 \\
  \textsc{LSTM} & & 1.110 & 1.142 \\
  \textsc{GRU} &  & 1.097 & 1.138 \\
@@ -212,37 +242,33 @@ We evaluate train and valid perplexity for all models.
 \caption{\label{tab:results} Perplexity on space insertion.}
 \end{table}
 
-After training, we also record the MSE for each model.
+After training, we also record the MSE for each model on valid with both test methods.
 
 \begin{center}
-  \begin{tabular}{| c | c | c |}
-    \hline Model & Algorithm & MSE \\
-    \hline Count & Greedy & \\
-    & DP & \\
-    NNLM & Greedy & \\
-    & DP & \\
-    LSTM & Greedy & \\
-    GRU & Greedy & \\
+  \begin{tabular}{ ccc}
+    \hline Model &  & MSE \\
+    \hline 5-gram Count+Greedy & \\
+    5-gram Count+DP & \\
+    NNLM+Greedy & \\
+    NNLM+DP & \\
+    LSTM &  & \\
+    GRU &  & \\
     \hline
   \end{tabular}
 \end{center}
 
 \subsection{Count Model}
 
-For the count model, we 
+For the count model, we experiment with the gram size up to 5. We use smoothing $\alpha = 0.1$.
 
 \subsection{NNLM}
 
-For the NNLM, we trained with hidden size 100, word embedding size 15, learning rate 0.01, batch size 32, and trained for 10 epochs (upon which validation perplexity stopped decreasing). We used a context size  (i.e. gram size) of 5. The NNLM takes about 30 seconds to train per epoch.
-
-Since the NNLM is Markovian, we 
+For the NNLM, we trained with hidden size 100, word embedding size 15, learning rate 0.01, batch size 32, and trained for 10 epochs (upon which validation perplexity stopped decreasing). We used a context size (i.e. gram size) of 5. The NNLM takes about 30 seconds to train per epoch.
 
 \subsection{RNN}
 
 For both the LSTM and GRU, we trained with hidden size 100, word embedding size 15, learning rate 0.1, batch size 32, and trained for 20 epochs. We track validation perplexity per epoch and halve learning rate if it stops decreasing (though this wasn't necessary in 20 epochs). The LSTM and GRU both take about 30 seconds per training epoch.
 
-The LSTM achieves an MSE of %%%%?
-The GRU achieves an MSE of 5.26.
 
 \begin{figure}[h]
 \centering
@@ -256,12 +282,10 @@ The GRU achieves an MSE of 5.26.
 \caption{Training curves for GRU.}
 \end{figure}
 
-
-
-The MSE for RNN greedy is that for $\mu = 0.3$, which was optimized by grid search on an LSTM trained for $20$ epochs. The results are given in the table below. 
+We experimented with the cutoff probability $\mu$ for the LSTM. We find that MSE on valid is optimized at $\mu = 0.3$, which was optimized by grid search on the LSTM trained for $20$ epochs. The results are given in the table below.  %% plot this?
 
 \begin{center}
-\begin{tabular}{| c | c |}
+\begin{tabular}{ c c}
   \hline $\mu$ & MSE \\
   \hline $0.1$ & 19.1\\
   $0.2$ & 7.7\\
