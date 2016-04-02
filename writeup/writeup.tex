@@ -180,12 +180,13 @@ Dynamic programming seeks to optimize the joint probability of a sequence with s
 $$\prod_{i=1}^{N} p(c_i = \texttt{<sp>} | c_{i-1}, \ldots, c_{i-n+1})$$
 Note that for a bigram model, if we assume that spaces cannot follow spaces, this probability can be optimized by the greedy algorithm (since the only terms in this probability are of the form $p(c_i = \texttt{<sp>} | c_{i-1})$ for $c_{i-1}$ a non-space).
 
-In a general n-gram model, we use a version of the Viterbi algorithm. We keep a table $\pi(i, B)$ where $B$ is a bitmask of length $n$. The bits of $B$ indicate which characters in the original sequence $c_{i-n+1}, \ldots, c_{i-1}, c_i$ have a space following, so that the least significant bit indicates if $y_i = 1$. Then $\pi(i, B)$ is the log probability of $y_i$ given the preceding $n-1$ characters as determined by the space bits from $B$.
+In a general n-gram model, we use a version of the Viterbi algorithm. We keep a table $\pi(i, B)$ where $B = y_{i-n+1} \ldots y_i$ is a bitmask of length $n$. The bits of $B$, $y_i$, indicate which characters in the original sequence $c_{i-n+1}, \ldots, c_{i-1}, c_i$ have a space following. Then $\pi(i, B)$ is equal to the joint log probability of the sequence $c_1, \ldots, c_i$ with final indicators of spaces $B = y_{i-n+1} \ldots y_i$.
 
 The Viterbi transition is then given by the recursion
 $$\pi(i, B) = \max_{B'} \pi(i-1, B') + g(\mathbf{c}_{(i-n+1):i}, B, B')$$
 Here, $B'$ is a bitmask which has the last $n-1$ bits equalling the first $n-1$ bits of $B$, and $g(\mathbf{c}_{(i-n+1):i}, B, B')$ gives
 $$\log p(y_i | c_i, \ldots, c_{i-n+1}, y_{i-1}, \ldots, y_{i-n+1})$$
+Note that this probability only depends on the previous $n-1$ characters as determined by the $c_j$ and spaces $y_j$.
 
 We can compute the optimal insertion of spaces by computing the table for $\pi$ and saving backpointers.
 
@@ -234,6 +235,7 @@ We evaluate train and valid perplexity for all models. Table~\ref{tab:results} s
  \textsc{3-gram Count} & &1.267 & 1.273 \\
  \textsc{4-gram Count} & &1.173 & 1.183  \\
  \textsc{5-gram Count} & &1.122 & 1.149 \\
+ \textsc{6-gram Count} & &1.102 & 1.168 \\
  \textsc{NNLM} & & 1.153 & 1.162 \\
  \textsc{LSTM} & & 1.110 & 1.142 \\
  \textsc{GRU} &  & 1.097 & 1.138 \\
@@ -242,24 +244,27 @@ We evaluate train and valid perplexity for all models. Table~\ref{tab:results} s
 \caption{\label{tab:results} Perplexity on space insertion.}
 \end{table}
 
-After training, we also record the MSE for each model on valid with both test methods.
+After training, we also record the MSE for each model on valid with both greedy and dynamic programming test methods. Table~\ref{tab:mse} summarizes results.
 
-\begin{center}
+\begin{table}[h]
+\centering
   \begin{tabular}{ ccc}
     \hline Model &  & MSE \\
-    \hline 5-gram Count+Greedy & \\
-    5-gram Count+DP & \\
-    NNLM+Greedy & \\
-    NNLM+DP & \\
-    LSTM &  & \\
-    GRU &  & \\
+    \hline 5-gram Count+Greedy & & 23.67\\
+    5-gram Count+DP & & 3.20 \\
+    NNLM+Greedy & & 15.14\\
+    NNLM+DP & & 11.26 \\
+    LSTM &  & 5.42 \\
+    GRU &  & 5.26 \\
     \hline
   \end{tabular}
-\end{center}
+\caption{MSE on space insertion for valid.}
+\label{tab:mse} 
+\end{table}
 
 \subsection{Count Model}
 
-For the count model, we experiment with the gram size up to 5. We use smoothing $\alpha = 0.1$.
+For the count model, we experiment with the gram size up to 5. We use smoothing $\alpha = 0.1$. We find that 5-gram gets the best valid perplexity, so we use this for the NNLM as well.
 
 \subsection{NNLM}
 
